@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  webMCU-AI  |  Vision CNN SD trainer  |  v002 (3D graph workbench on top of v001, which was built from index-v007 / page v006)
+  webMCU-AI  |  Vision CNN SD trainer  |  v003 (tuning plan and coach on top of the v002 3D graph workbench; v001 was built from index-v007 / page v006)
   Companion page for the XIAO ESP32-S3 "FULL VISION ML" firmware (firmware-v007; firmware-v005 and later send debug frames).
   Reads images/<class>/*.jpg from the SD card, trains the same CNN (input size and filters selectable) in plain JS,
   analyzes the dataset, and writes header/myWeights.bin back for the device to load.
@@ -11,13 +11,16 @@
         in the same dense myWeights.bin layout. Model A with the same seed matches the v006 forward/backward pass bit for bit (tested).
   v002: section 4 "Model Graph" is now an interactive Three.js 3D view (topology, activation flow) with the 2D schematic kept as a third view.
         Training, forward/backward pass, weight file and config export are unchanged from v001.
+  v003: a tuning plan (encourage / reduce / freeze an island, channel or connection, prune a bridge) that a person or the new Coach tab can write.
+        The plan scales the Adam step per weight; forward pass, backward pass, weight file and an empty plan are unchanged (empty plan = v002 training).
+        Coach tab: evidence from zero-ablation, ideas as moves, an auto-coach that keeps a move only if it beats a control run, journal, JSON moves in and out.
   Three.js r128 is loaded from cdnjs for the 3D view only. Without it (offline) the page works and shows the 2D schematic. MIT license. Use at your own risk.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vision CNN SD trainer v002 (3D graph workbench)</title>
+<title>Vision CNN SD trainer v003 (tuning plan and coach)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 :root{--bg:#11151b;--panel:#182029;--panel2:#1f2a36;--line:#2c3947;--text:#dde5ee;--mut:#8b9aac;--acc:#66d1bd;--acc-ink:#062a24;--bad:#ef6b73;--warn:#e9b44c;--ok:#7bd88f;--r:8px}
@@ -115,7 +118,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 </head>
 <body>
 <header>
-  <h1>Vision CNN SD trainer<span class="ver">v002 3D graph workbench</span></h1>
+  <h1>Vision CNN SD trainer<span class="ver">v003 tuning plan + coach</span></h1>
   <p>Browser companion for the XIAO ESP32-S3 FULL VISION ML firmware (firmware-v007; firmware-v005 and later also give config.json class names and debug frames): load the SD card, add images, review and clean them, train the same CNN, then write myWeights.bin back to the card.</p>
   <p>Everything runs in this page. Images and weights never leave your computer.</p>
 </header>
@@ -263,7 +266,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
   <p class="note">Research tools for the conv1 to conv2 channel graph. Every result is labelled with the dataset split it was measured on. There is no separate test set: the validation images are used only to look at results, never to pick bridges (Model D picks them from gate scores learned on the training images). Structure, weights and ablations are evidence about this one trained model, not proof that a filter means something.</p>
   <div class="tabs" id="myTabs">
     <button class="tabbtn on" data-t="0">Train &amp; Predict</button><button class="tabbtn" data-t="1">Model Graph</button><button class="tabbtn" data-t="2">Islands &amp; Bridges</button><button class="tabbtn" data-t="3">Activations</button>
-    <button class="tabbtn" data-t="4">Ablation</button><button class="tabbtn" data-t="5">Graph Statistics</button><button class="tabbtn" data-t="6">Compare Models</button><button class="tabbtn" data-t="7">Configuration &amp; Export</button>
+    <button class="tabbtn" data-t="4">Ablation</button><button class="tabbtn" data-t="5">Graph Statistics</button><button class="tabbtn" data-t="6">Compare Models</button><button class="tabbtn" data-t="7">Configuration &amp; Export</button><button class="tabbtn" data-t="8">Coach &amp; Tuning</button>
   </div>
   <div class="tabpane on" id="gp0">
     <div class="info" id="myP0Info"></div>
@@ -301,6 +304,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
       <div class="my3dSide">
         <div class="info" id="myEdgeInfo">Click an edge or a node for details.</div>
         <div class="info" id="my3dAblOut" style="margin-top:8px">Switch a node or bridge off in the panel above to test it.</div>
+        <div class="info" id="my3dEmph" style="margin-top:8px"></div>
       </div>
     </div>
     <p class="note">3D: drag to orbit, shift-drag or right-drag to pan, wheel or pinch to zoom, hover to light up one node's forward and backward connections, click for details. Sphere size = degree (number of conv1 to conv2 connections). Glow halo or heat colour = bridge importance (betweenness: how many shortest paths between channels run through it). Tube thickness = mean |weight|, so pruned or near-zero connections thin out or vanish. <b>Red glowing arcs</b> = bridges between islands (fixed in C, selected in D), grey faint tubes = candidates, grey with ✕ = switched off. Flow view: colour = activation of the last image (blue cold, red hot), particles run RGB &rarr; conv1 &rarr; conv2 &rarr; classes.</p>
@@ -333,6 +337,34 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
     <div class="info" id="myCfgMsg">Config import sets the section 3 controls only. It never changes weights.</div>
     <h3>Current configuration (graph-config.json)</h3><textarea id="myCfgTxt" class="mono" readonly aria-label="Configuration JSON"></textarea>
     <h3>What future firmware must implement</h3><pre id="myFmtDoc"></pre>
+  </div>
+  <div class="tabpane" id="gp8">
+    <p class="note">One tuning plan, two authors. Every move below (encourage, reduce, freeze or prune an island, a channel or a bridge) is the same small record whether you click it, the coach proposes it, or you paste it as JSON. The plan changes how the next training steps treat those weights: encourage = learning rate x2, reduce = x0.5 and the weights shrink slightly, freeze = x0, prune = a bridge is removed for good. The forward and backward pass are not touched.</p>
+    <h3>1. Your decisions</h3>
+    <div id="myCoachIsl"></div><div id="myCoachBr"></div>
+    <div class="info" id="myCoachPlan" style="margin-top:8px"></div>
+    <div class="row">
+      <label class="chk">Epochs <input type="number" id="myCoachEp" value="3" min="1" max="50" style="width:80px" aria-label="Epochs"></label>
+      <button class="primary" onclick="myCoachRun('plan')">Train more epochs with this plan</button><button onclick="myClearPlan()">Clear plan</button><button class="danger" onclick="state.stop = true">STOP</button>
+    </div>
+    <p class="note">Uses the learning rate, batch size, dropout and augmentation of section 3 and continues the weights in memory.</p>
+    <h3>2. The coach: ideas from the evidence</h3>
+    <div class="row"><button class="primary" onclick="myCoachAnalyse()">Analyse this model</button><button onclick="myCoachAcceptAll()">Accept all ideas</button></div>
+    <div id="myCoachSug"></div><div id="myCoachEv"></div>
+    <h3>3. Auto-coach</h3>
+    <p class="note">Each round: the coach picks its best moves, trains the epochs above with them, then trains the same epochs from the same starting point without them (same shuffling). It keeps the moves only if validation accuracy is not worse than the control (within the margin below) and loss is not clearly worse. Rejected moves are not tried again. Every decision lands in the journal, so you can read it, undo it, or redo it by hand. Costs two training runs per round.</p>
+    <div class="row">
+      <label class="chk">Rounds <input type="number" id="myCoachRounds" value="3" min="1" max="10" style="width:70px" aria-label="Rounds"></label>
+      <label class="chk">Moves per round <input type="number" id="myCoachMax" value="2" min="1" max="6" style="width:70px" aria-label="Moves per round"></label>
+      <label class="chk">Accuracy margin (pts) <input type="number" id="myCoachTol" value="0" min="0" max="10" step="0.5" style="width:80px" aria-label="Accuracy margin in points"></label>
+      <button class="primary" onclick="myCoachRun('auto')">Run auto-coach</button>
+    </div>
+    <div class="info" id="myCoachStatus">Idle.</div>
+    <h3>Journal</h3><div id="myCoachLog"></div>
+    <h3>Moves as JSON</h3>
+    <textarea id="myCoachJson" class="mono" aria-label="Moves as JSON" placeholder='[{"kind":"island","i":1,"mode":"reduce","why":"example"}]'></textarea>
+    <div class="row"><button onclick="myCoachJsonApply()">Apply these moves</button><button onclick="myCoachDownload()">Download tuning session (plan, journal, evidence)</button></div>
+    <p class="note">The downloaded session is plain JSON with the move format described inside it, so a script or an AI assistant can read the evidence and write moves back in the same shape.</p>
   </div>
 </section>
 
@@ -474,7 +506,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 
 <script>
 'use strict';
-const VERSION = 'v002';
+const VERSION = 'v003';
 
 /* ==CORE START== (no DOM use below this line until CORE END) */
 
@@ -653,7 +685,12 @@ function adamUpdate(wt, gr, m, v, step, lr, maxStep) {
     wt[i] = clipv(wt[i] - d, -10, 10);
   }
 }
-function updateWeights(net, step, lr, maxStep) { for (const k of PARAM_ORDER) adamUpdate(net.w[k], net.g[k], net.m[k], net.v[k], step, lr, maxStep); myPostUpdate(net, step); }
+function updateWeights(net, step, lr, maxStep) {
+  const fx = net.fx && net.fx.on ? net.fx : null, pre = fx ? myFxPre(net) : null;   // v003: only when the tuning plan has moves
+  for (const k of PARAM_ORDER) adamUpdate(net.w[k], net.g[k], net.m[k], net.v[k], step, lr, maxStep);
+  if (fx) myFxApply(net, pre);
+  myPostUpdate(net, step);
+}
 function zeroGrad(net) { for (const k of PARAM_ORDER) net.g[k].fill(0); net.gg.fill(0); }
 
 function argmax(p) { let b = 0; for (let i = 1; i < p.length; i++) if (p[i] > p[b]) b = i; return b; }
@@ -1034,7 +1071,8 @@ function myConfigObj(net, classes, extra) {
       bridgeBudget: t.type === 'C' || isD ? t.K : 0, candidateBridgeCount: t.type === 'C' || isD ? myCandidates(G).length : 0,
       selectionMethod: t.type === 'C' ? 'designedEvenlySpaced' : (isD ? 'trainGatesThenSelectTopK' : 'none'),
       stage: isD ? (t.stage === 'final' ? 'selected' : 'untrained') : 'fixed', selectedBridges: sel.map(([f, c]) => ({ dst: f, src: c })), edgeMask: myMaskRows(net) },
-    training: { seed: t.seed || null, sparsityPenalty: isD ? t.lam : null, gateLearningRate: isD ? t.gateLr : null, fineTuneEpochs: isD ? t.ft : null }
+    training: { seed: t.seed || null, sparsityPenalty: isD ? t.lam : null, gateLearningRate: isD ? t.gateLr : null, fineTuneEpochs: isD ? t.ft : null },
+    tuning: { moves: (net.fx ? net.fx.plan : []).map(m => Object.assign({}, m)) }
   }, extra || {});
 }
 // Checks a config against the page's current layout and classes. Returns { errors, topo }.
@@ -1088,6 +1126,112 @@ function myImportBundle(b, classes) {   // throws Error with a readable message;
 function myMaskHeader(net) {
   const rows = []; for (let f = 0; f < C2F; f++) { const r = []; for (let c = 0; c < C1F; c++) r.push(net.edge[f * C1F + c] > 0 ? 1 : 0); rows.push('  {' + r.join(', ') + '}'); }
   return '// myConnMask.h  (generated by the page, ' + MY_TYPES[net.topo.type] + ', ' + net.topo.G + ' islands)\n// 1 = this conv1 channel feeds this conv2 filter. Same dimensions as the sketch: CONV2_FILTERS rows, CONV1_FILTERS columns.\n// Weight layout is unchanged: myConv2_w[f * CONV2_IN_STRIDE + c * 9 + ky * 3 + kx]. Off edges hold exactly 0.0f in myWeights.bin.\n#define MY_GROUPS ' + net.topo.G + '\nconst uint8_t myConv2Edge[' + C2F + '][' + C1F + '] = {\n' + rows.join(',\n') + '\n};\n';
+}
+
+// ---- v003 tuning plan ----
+// One short list of moves. A person writes it with buttons, the coach writes it with rules, pasted JSON can write it too.
+// Modes: encourage (learning rate x2), normal, reduce (x0.5 plus a small shrink of the weights), freeze (x0), prune (a bridge only: removed for good).
+// Move shapes: {kind:'island', i, mode}  {kind:'channel', layer:'c1'|'c2', i, mode}  {kind:'edge', f, c, mode}  (f = conv2 filter, c = conv1 channel)
+const MY_MODES = { encourage: { lr: 2, decay: 0 }, normal: { lr: 1, decay: 0 }, reduce: { lr: 0.5, decay: 0.003 }, freeze: { lr: 0, decay: 0 } };
+const myMoveKey = m => m.kind === 'island' ? 'island:' + m.i : m.kind === 'channel' ? m.layer + ':' + m.i : 'edge:' + m.f + ',' + m.c;
+function myMoveValid(m, G) {
+  if (!m || typeof m !== 'object') return false;
+  const okInt = (v, n) => Number.isInteger(v) && v >= 0 && v < n;
+  if (m.kind === 'edge') return okInt(m.f, C2F) && okInt(m.c, C1F) && (m.mode === 'prune' || !!MY_MODES[m.mode]);
+  if (!MY_MODES[m.mode]) return false;
+  if (m.kind === 'island') return okInt(m.i, G);
+  if (m.kind === 'channel') return (m.layer === 'c1' && okInt(m.i, C1F)) || (m.layer === 'c2' && okInt(m.i, C2F));
+  return false;
+}
+function myMoveText(m) {
+  const what = m.kind === 'island' ? 'island ' + m.i : m.kind === 'channel' ? (m.layer === 'c1' ? 'conv1 channel ' : 'conv2 filter ') + m.i : 'connection c1\u00b7' + m.c + '\u2192c2\u00b7' + m.f;
+  return what + ' \u2192 ' + m.mode;
+}
+// turns the plan into per-channel and per-connection learning-rate multipliers and weight shrink amounts
+function myFxFor(G, plan) {
+  const E = C1F * C2F, fx = { c1: new Float32Array(C1F).fill(1), c1d: new Float32Array(C1F), c2: new Float32Array(C2F).fill(1), c2d: new Float32Array(C2F), e: new Float32Array(E).fill(1), ed: new Float32Array(E), on: false, plan: plan.map(m => Object.assign({}, m)) };
+  const put = (m, arr, dec, i) => { const s = MY_MODES[m.mode]; if (!s) return; arr[i] *= s.lr; dec[i] += s.decay; fx.on = true; };
+  for (const m of plan) {
+    if (!myMoveValid(m, G)) continue;
+    if (m.kind === 'island') {
+      for (let c = 0; c < C1F; c++) if (myIsl1(c, G) === m.i) put(m, fx.c1, fx.c1d, c);
+      for (let f = 0; f < C2F; f++) if (myIsl2(f, G) === m.i) put(m, fx.c2, fx.c2d, f);
+    } else if (m.kind === 'channel') { if (m.layer === 'c1') put(m, fx.c1, fx.c1d, m.i); else put(m, fx.c2, fx.c2d, m.i); }
+    else put(m, fx.e, fx.ed, m.f * C1F + m.c);
+  }
+  return fx;
+}
+function myFxPre(net) { const w = net.w; return { c1w: w.c1w.slice(), c1b: w.c1b.slice(), c2w: w.c2w.slice(), c2b: w.c2b.slice(), ow: w.ow.slice() }; }
+// runs right after the Adam step: the step is scaled per weight (x0 keeps the old value), then the optional shrink is applied
+function myFxApply(net, pre) {
+  const fx = net.fx, w = net.w, P = C2O * C2O, N = net.N;
+  const mix = (a, old, i, m, d) => { a[i] = old[i] + m * (a[i] - old[i]); if (m > 0 && d > 0) a[i] *= 1 - d; };
+  for (let c = 0; c < C1F; c++) { for (let j = 0; j < 27; j++) mix(w.c1w, pre.c1w, c * 27 + j, fx.c1[c], fx.c1d[c]); mix(w.c1b, pre.c1b, c, fx.c1[c], fx.c1d[c]); }
+  for (let f = 0; f < C2F; f++) {
+    for (let c = 0; c < C1F; c++) { const e = f * C1F + c, m = fx.c2[f] * fx.e[e], d = fx.c2d[f] + fx.ed[e], b = f * 9 * C1F + c * 9; for (let i = 0; i < 9; i++) mix(w.c2w, pre.c2w, b + i, m, d); }
+    mix(w.c2b, pre.c2b, f, fx.c2[f], fx.c2d[f]);
+    for (let k = 0; k < N; k++) for (let p = 0; p < P; p++) mix(w.ow, pre.ow, k * FLAT + f * P + p, fx.c2[f], fx.c2d[f]);
+  }
+}
+// pruning a bridge removes it for good (weight and optimizer state become exact zeros). A hand-edited bridge set is listed as type D, final stage.
+function myPrune(net, f, c) {
+  const e = f * C1F + c, t = net.topo;
+  if (net.edge[e] !== 2 || (t.type !== 'C' && t.type !== 'D')) return false;
+  net.edge[e] = 0; t.type = 'D'; t.stage = 'final'; t.sel = [];
+  for (let k = 0; k < net.edge.length; k++) if (net.edge[k] === 2) t.sel.push([Math.floor(k / C1F), k % C1F]);
+  t.K = t.sel.length; myEnforceMask(net); myRefreshGates(net); net.ver++; return true;
+}
+function myLossOf(r, set) { let s = 0; for (let i = 0; i < set.length; i++) s -= Math.log(Math.max(r.probs[i][set[i].cls], 1e-7)); return s / set.length; }
+function myMeasure(net, set, buf) { const r = myRunSet(net, set, buf); return { acc: mySummary(set, r.pred, net.N).acc, loss: myLossOf(r, set) }; }
+// the evidence: what each island, bridge and channel is worth to this model on this image set (zero-ablation, one element at a time)
+function myCoachDiag(net, set, buf) {
+  const G = net.topo.G, N = net.N, labels = set.map(s => s.cls);
+  const base = myRunSet(net, set, buf, true), sb = mySummary(set, base.pred, N), loss0 = myLossOf(base, set);
+  const probe = spec => { const r = myWithAbl(net, spec, () => myRunSet(net, set, buf)); return { dAcc: mySummary(set, r.pred, N).acc - sb.acc, dLoss: myLossOf(r, set) - loss0 }; };
+  const st = { c1: myChanStats(base.A1, labels, N), c2: myChanStats(base.A2, labels, N) };
+  const sepOf = s => s.spread == null ? 0 : s.spread / (Math.sqrt(s.variance) + 1e-9);
+  const chan = [];
+  for (const layer of ['c1', 'c2']) {
+    const n = layer === 'c1' ? C1F : C2F, mx = Math.max(1e-9, ...st[layer].map(s => s.absMean));
+    for (let i = 0; i < n; i++) chan.push(Object.assign({ layer, i, isl: layer === 'c1' ? myIsl1(i, G) : myIsl2(i, G), rel: st[layer][i].absMean / mx, sep: sepOf(st[layer][i]) }, probe(layer === 'c1' ? { c1: [i], c2: [], e: [] } : { c1: [], c2: [i], e: [] })));
+  }
+  const isl = [];
+  for (let i = 0; i < G; i++) { const ch = chan.filter(x => x.isl === i); isl.push(Object.assign({ i, sep: ch.reduce((a, x) => a + x.sep, 0) / Math.max(1, ch.length) }, probe(myIslandSpec(i, G)))); }
+  const br = [];
+  for (let e = 0; e < net.edge.length; e++) if (net.edge[e] === 2) {
+    const f = Math.floor(e / C1F), c = e % C1F, b = f * 9 * C1F + c * 9; let a = 0; for (let k = 0; k < 9; k++) a += Math.abs(net.w.c2w[b + k]);
+    br.push(Object.assign({ f, c, e, mw: a / 9 }, probe({ c1: [], c2: [], e: [e] })));
+  }
+  const red = [];
+  for (const layer of ['c1', 'c2']) { const R = myCorr(layer === 'c1' ? base.A1 : base.A2); for (let a = 0; a < R.length; a++) for (let b = a + 1; b < R.length; b++) if (R[a][b] !== null && Math.abs(R[a][b]) > 0.95) red.push({ layer, a, b, r: R[a][b] }); }
+  let conf = null;
+  for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) if (a !== b && sb.cm[a][b] > 0 && (!conf || sb.cm[a][b] > conf.count)) conf = { a, b, count: sb.cm[a][b] };
+  const pairSep = isl.map(x => { const ch = chan.filter(y => y.layer === 'c2' && y.isl === x.i); if (!conf || !ch.length) return 0; let s = 0; for (const y of ch) { const pc = st.c2[y.i].perClass; if (pc[conf.a] != null && pc[conf.b] != null) s += Math.abs(pc[conf.a] - pc[conf.b]) / (Math.sqrt(st.c2[y.i].variance) + 1e-9); } return s / ch.length; });
+  return { n: set.length, acc: sb.acc, loss: loss0, isl, br, chan, red, conf, pairSep };
+}
+// rules that turn the evidence into moves. Same move shapes a person uses. blocked = moves already tried and rejected.
+function myCoachSuggest(d, plan, blocked) {
+  const out = [], pts = v => (v >= 0 ? '+' : '') + (100 * v).toFixed(1) + ' pts';
+  const cur = m => { const x = plan.find(p => myMoveKey(p) === myMoveKey(m)); return x ? x.mode : 'normal'; };
+  const add = (m, why, score) => { if (blocked.has(myMoveKey(m) + ':' + m.mode) || cur(m) === m.mode) return; out.push({ move: m, why, score }); };
+  for (const b of d.br) {
+    const nm = 'Bridge c1\u00b7' + b.c + '\u2192c2\u00b7' + b.f, m = { kind: 'edge', f: b.f, c: b.c };
+    if (b.dAcc >= 0 && b.dLoss < 0.01) add(Object.assign(m, { mode: cur(m) === 'reduce' ? 'prune' : 'reduce' }), nm + ': switching it off changes accuracy by ' + pts(b.dAcc) + ' and loss by ' + b.dLoss.toFixed(3) + ', so the model barely uses it.', 0.6 + Math.min(0.3, Math.max(0, -b.dLoss * 5)));
+    else if (b.dAcc <= -0.03 || b.dLoss > 0.1) add(Object.assign(m, { mode: 'encourage' }), nm + ': switching it off changes accuracy by ' + pts(b.dAcc) + ' and loss by +' + b.dLoss.toFixed(3) + ', it carries real signal.', 0.5 + Math.min(0.4, b.dLoss));
+  }
+  const strongest = Math.max(...d.isl.map(x => x.dLoss)), seps = d.isl.map(x => x.sep).sort((a, b) => a - b), med = seps[Math.floor(seps.length / 2)];
+  if (d.isl.length > 1 && strongest > 0.05) for (const x of d.isl) if (x.dAcc >= -0.005 && x.dLoss < 0.25 * strongest) {
+    if (x.sep >= med) add({ kind: 'island', i: x.i, mode: 'encourage' }, 'Island ' + x.i + ' is barely needed (switching it off: ' + pts(x.dAcc) + ' accuracy) but its channels do separate the classes, so it is probably under-trained.', 0.55);
+    else add({ kind: 'island', i: x.i, mode: 'reduce' }, 'Island ' + x.i + ' is barely needed (switching it off: ' + pts(x.dAcc) + ' accuracy) and its channels do not separate the classes.', 0.5);
+  }
+  if (d.conf && d.isl.length > 1) { let best = 0; d.pairSep.forEach((v, i) => { if (v > d.pairSep[best]) best = i; }); if (d.pairSep[best] > 0) add({ kind: 'island', i: best, mode: 'encourage' }, 'Most confused pair: class ' + d.conf.a + ' read as class ' + d.conf.b + ' (' + d.conf.count + 'x). Island ' + best + ' separates those two classes best.', 0.55); }
+  for (const c of d.chan) if (c.rel < 0.02) add({ kind: 'channel', layer: c.layer, i: c.i, mode: 'encourage' }, (c.layer === 'c1' ? 'conv1 channel ' : 'conv2 filter ') + c.i + ' is almost silent (activation ' + (100 * c.rel).toFixed(1) + '% of its layer\'s strongest). A higher learning rate may wake it up.', 0.45);
+  for (const p of d.red.slice().sort((x, y) => Math.abs(y.r) - Math.abs(x.r)).slice(0, 3)) {
+    const A = d.chan.find(x => x.layer === p.layer && x.i === p.a), B = d.chan.find(x => x.layer === p.layer && x.i === p.b), weak = (A.dLoss < B.dLoss || (A.dLoss === B.dLoss && A.sep <= B.sep)) ? A : B;
+    add({ kind: 'channel', layer: p.layer, i: weak.i, mode: 'reduce' }, (p.layer === 'c1' ? 'conv1 channels ' : 'conv2 filters ') + p.a + ' and ' + p.b + ' move together (correlation ' + p.r.toFixed(2) + '). ' + weak.i + ' matters less, so it is the one to reduce.', 0.4);
+  }
+  const best = new Map(); for (const s of out) { const k = myMoveKey(s.move); if (!best.has(k) || best.get(k).score < s.score) best.set(k, s); }
+  return [...best.values()].sort((a, b) => b.score - a.score);
 }
 
 /* ==CORE END== */
@@ -1978,6 +2122,8 @@ if (!window.showDirectoryPicker) {
 // ======================================================================
 let myRuns = {}, myReps = {}, myActs = null, myTab = 0, myBatch = false, myEdgeSel = -1;
 const myAbl = { c1: new Set(), c2: new Set(), e: new Set() };
+let myPlan = [], myJournal = [], myCoachSug = [], myCoachDiagLast = null;
+const myCoachBlocked = new Set();
 function myResetRuns() { myRuns = {}; myReps = {}; myActs = null; myAbl.c1.clear(); myAbl.c2.clear(); myAbl.e.clear(); }
 const myPct = v => v == null || !Number.isFinite(v) ? 'n/a' : (100 * v).toFixed(1) + '%';
 const myNum = (v, d = 3) => v == null || !Number.isFinite(v) ? 'n/a' : v.toFixed(d);
@@ -2029,7 +2175,7 @@ function myRenderGraphUI() {
 function myRenderTab() {
   document.querySelectorAll('#myTabs .tabbtn').forEach(b => b.classList.toggle('on', +b.dataset.t === myTab));
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('on', p.id === 'gp' + myTab));
-  ([myRenderP0, myRenderGraph, myRenderIB, myRenderActs, myRenderAblUi, myRenderStats, myRenderCmp, myRenderCfg][myTab])();
+  ([myRenderP0, myRenderGraph, myRenderIB, myRenderActs, myRenderAblUi, myRenderStats, myRenderCmp, myRenderCfg, myRenderCoach][myTab])();
 }
 function myRenderP0() {
   const g = myCur(); let h = '<div><b>' + esc(myDesc(g.net.topo)) + '</b>' + (g.live ? '' : ' (planned, no weights yet)') + '</div>';
@@ -2258,6 +2404,7 @@ async function onTrain() {
     for (let i = 0; i < all.length; i++) { await getBytes(all[i]); if (i % 10 === 0) { setSt('Decoding images ' + (i + 1) + ' / ' + all.length + ' ...'); await tick(); } }
     if (!cont) { state.net = makeNet(N); want.seed = seed; myInstallTopo(state.net, want); log('Started from random He-init weights, seed ' + seed + ', ' + myDesc(want) + '.'); } else log('Continuing from the weights in memory (' + myDesc(state.net.topo) + ').');
     const net = state.net; for (const k of PARAM_ORDER) { net.m[k].fill(0); net.v[k].fill(0); }
+    myFxSync(net); if (myPlan.length) log('Tuning plan in force: ' + myPlan.map(myMoveText).join('; ') + '.');
     const gating = net.topo.stage === 'gating', st = { name: gating ? 'stage 1 (gates) ' : '', n: o.epochs };
     state.epochsPlanned = o.epochs + (gating ? want.ft : 0);
     const trainBuf = new Float32Array(IN * IN * 3);
@@ -2355,7 +2502,7 @@ async function myImportBundle2(file) {
     m.innerHTML = '<span class="ok">Imported ' + esc(myDesc(net.topo)) + '. Weights, mask and class labels agree.</span>'; log('Imported model bundle: ' + myDesc(net.topo) + '.'); renderAll();
   } catch (e) { m.innerHTML = '<span class="bad">Bundle refused:</span><br>' + esc(e.message).replace(/\n/g, '<br>'); }
 }
-function myDefaults() { Object.assign($('myType'), { value: 'A' }); $('myG').value = 2; $('myK').value = 4; $('mySeed').value = ''; $('myLam').value = 0.05; $('myGateLr').value = 0.05; $('myFt').value = 10; myRenderGraphUI(); $('myCfgMsg').textContent = 'Defaults restored (Model A, 2 islands, budget 4). Weights in memory were not changed.'; }
+function myDefaults() { myPlan = []; myFxSync(state.net); Object.assign($('myType'), { value: 'A' }); $('myG').value = 2; $('myK').value = 4; $('mySeed').value = ''; $('myLam').value = 0.05; $('myGateLr').value = 0.05; $('myFt').value = 10; myRenderGraphUI(); $('myCfgMsg').textContent = 'Defaults restored (Model A, 2 islands, budget 4). Weights in memory were not changed.'; }
 // ======================================================================
 //  v002 3D GRAPH WORKBENCH (Three.js, loaded from a CDN; the 2D schematic still works without it)
 // ======================================================================
@@ -2576,6 +2723,7 @@ function my3dBuild() {
   }
   for (let f = 0; f < C2F; f++) for (let k = 0; k < N; k++) addEdge('c2:' + f, 'cl:' + k, 'ke:' + f + ',' + k, { r: useW || detail ? 0.02 + 0.1 * mo[f * N + k] / maxO : 0.02, col: 0x6f8fb8, op: detail ? 0.4 : 0.1, abl: myAbl.c2.has(f), meta: { kind: 'cl', f, k } });
 
+  my3dDecorate(); my3dEmphIslands();
   my3dRecolor(); my3dApplyHighlight(); my3dRingUpdate(); my3dResize(); my3dStart();
   if (my3dInsp) my3dInspect(my3dInsp);
 }
@@ -2647,7 +2795,7 @@ function my3dNodeExtra(id) {
     if (net.w && ty === 'c1') h += '<div>3x3 kernels for the R, G, B inputs (bias ' + myNum(net.w.c1b[n]) + '):</div>' + [0, 1, 2].map(ch => myKernelHtml((r, q) => net.w.c1w[n * 27 + r * 9 + q * 3 + ch])).join('');
     if (net.w && ty === 'c2') h += '<div>Bias ' + myNum(net.w.c2b[n]) + '. Click an incoming edge to see its 3x3 kernel.</div>';
     h += fresh ? '<div>Mean activation per class (' + myActs.split + ' images):</div>' + myBarsHtml(state.classes, (ty === 'c1' ? myActs.st1 : myActs.st2)[n].perClass) : '<div><button onclick="my3dComputeActs()">Compute per-class activations</button></div>';
-    h += my3dSwitchHtml(id);
+    h += my3dSwitchHtml(id) + my3dEmphHtml(id);
   } else if (ty === 'cl' && net.w) h += '<div>Mean |weight| from each conv2 filter into this class:</div>' + myBarsHtml(Array.from({ length: C2F }, (_, f) => 'c2\u00b7' + f), Array.from({ length: C2F }, (_, f) => my3dW.mo[f * net.N + n]));
   return h;
 }
@@ -2656,7 +2804,7 @@ function my3dInspect(id) {
   my3dInsp = id || ''; const box = $('myEdgeInfo');
   if (!id) { box.textContent = 'Click an edge or a node for details.'; return; }
   if (id === 'in:0') { box.innerHTML = '<b>Input RGB image</b>. Every conv1 channel reads it with its own 3x3x3 kernel.'; return; }
-  if (id.startsWith('e:')) { const e = +id.slice(2); myEdgeInfo(e); box.innerHTML += '<div>Bridge importance (edge betweenness, 0 to 1): <b>' + my3dBc.edge(e).toFixed(2) + '</b>.</div>' + my3dSwitchHtml(id); return; }
+  if (id.startsWith('e:')) { const e = +id.slice(2); myEdgeInfo(e); box.innerHTML += '<div>Bridge importance (edge betweenness, 0 to 1): <b>' + my3dBc.edge(e).toFixed(2) + '</b>.</div>' + my3dSwitchHtml(id) + my3dEmphHtml(id); return; }
   if (id.startsWith('ie:')) { box.innerHTML = '<div><b>RGB to conv1 channel ' + id.slice(3) + '</b>. Click the node to see its kernels.</div>'; return; }
   if (id.startsWith('ke:')) { const [f, k] = id.slice(3).split(',').map(Number); box.innerHTML = '<div><b>conv2 filter ' + f + ' to class ' + esc(state.classes[k] || k) + '</b>: a classifier connection (' + (C2O * C2O) + ' scalar weights). Mean |weight| ' + myNum(my3dW.mo[f * myCur().N + k], 4) + '.</div>'; return; }
   myNodeInfo(id); box.innerHTML += my3dNodeExtra(id);
@@ -2751,7 +2899,7 @@ function my3dReport() {
   const chan = (ty, n, isl, deg, b) => ({ id: ty + ':' + n, island: isl, degree: deg, betweenness: +b.toFixed(4), switchedOff: myAbl[ty].has(n), activationNow: A ? +(ty === 'c1' ? A.raw1 : A.raw2)[n].toFixed(4) : null, perClassMeanActivation: fresh ? (ty === 'c1' ? myActs.st1 : myActs.st2)[n].perClass : null });
   const nodes = Array.from({ length: C1F }, (_, c) => chan('c1', c, myIsl1(c, G), deg1[c], bc.node[c])).concat(Array.from({ length: C2F }, (_, f) => chan('c2', f, myIsl2(f, G), deg2[f], bc.node[C1F + f])));
   const edges = on.map(([c, fo, e]) => ({ from: 'c1:' + c, to: 'c2:' + (fo - C1F), edge: e, status: myEdgeStatus(net, e), meanAbsWeight: meanW(e), betweenness: +bc.edge(e).toFixed(4), switchedOff: myAbl.e.has(e) }));
-  myDl('interpretability-v002.json', JSON.stringify({ page: 'vision-cnn-sd-trainer ' + VERSION, model: myDesc(net.topo), layout: layoutKey(), classes: state.classes, hasWeights: !!net.w, nodes, edges }, null, 1));
+  myDl('interpretability-v003.json', JSON.stringify({ page: 'vision-cnn-sd-trainer ' + VERSION, model: myDesc(net.topo), layout: layoutKey(), classes: state.classes, hasWeights: !!net.w, tuningPlan: myPlan.map(m => Object.assign({}, m)), coachJournal: myJournal, nodes, edges }, null, 1));
 }
 
 // view switch: 3D when Three.js and WebGL work, otherwise the 2D schematic (myRenderGraph2d)
@@ -2759,7 +2907,7 @@ function myRenderGraph() {
   if ($('myView').value !== '2d' && !my3dInit()) { $('myView').value = '2d'; $('my3dMsg').textContent = my3dHasThree() ? 'WebGL is not available in this browser, so the 2D schematic is shown.' : 'Three.js could not be loaded (offline?), so the 2D schematic is shown.'; }
   const d3 = $('myView').value !== '2d';
   $('my3dBox').style.display = d3 ? 'block' : 'none'; $('myGraphSvg').style.display = d3 ? 'none' : 'block';
-  if (d3) my3dBuild(); else myRenderGraph2d();
+  if (d3) my3dBuild(); else { myRenderGraph2d(); my3dEmphIslands(); }
 }
 
 // ---------- wiring ----------
@@ -2781,6 +2929,174 @@ $('btnHdr').onclick = () => myDl('myConnMask.h', myMaskHeader(myCfgNet()), 'text
 
 syncHeatControls(); syncLayoutControls(); renderAll();
 log('Vision CNN SD trainer ' + VERSION + ' ready. Layout ' + IN + 'x' + IN + 'x3, conv filters ' + C1F + '/' + C2F + ', ' + FLAT + ' flattened.');
+// ======================================================================
+//  v003 TUNING PLAN AND COACH (UI)
+// ======================================================================
+function myModeOf(m) { return (myPlan.find(x => myMoveKey(x) === myMoveKey(m)) || { mode: 'normal' }).mode; }
+function myMoveBtns(kind, a, b, cur, prune) {
+  return ['encourage', 'normal', 'reduce', 'freeze'].concat(prune ? ['prune'] : []).map(md => {
+    const cls = md === cur ? 'primary' : (md === 'prune' ? 'danger' : '');
+    return '<button class="' + cls + '" style="min-height:34px;padding:4px 10px" onclick="myUiMove(\'' + kind + '\',' + (typeof a === 'string' ? '\'' + a + '\'' : a) + ',' + b + ',\'' + md + '\')">' + md + '</button>';
+  }).join(' ');
+}
+function myFxSync(net) { if (net) net.fx = myFxFor(net.topo.G, myPlan); }
+function myPlanSet(m) { myPlan = myPlan.filter(x => myMoveKey(x) !== myMoveKey(m)); if (m.mode !== 'normal') myPlan.push(m); myFxSync(state.net); }
+function myPlanCopy() { return myPlan.map(m => Object.assign({}, m)); }
+function myApplyMove(m, who, why) {
+  const net = myLive(), G = myCur().net.topo.G; if (!myMoveValid(m, G)) return false;
+  if (m.mode === 'prune') {
+    if (!net) return false;
+    const was = net.topo.type; if (!myPrune(net, m.f, m.c)) return false;
+    if (was === 'C') log('Pruning turned the designed archipelago into a hand-edited bridge set, now listed as Learned archipelago (type D, final stage).');
+  } else myPlanSet(m);
+  myJournal.push({ t: new Date().toLocaleTimeString(), who, move: myMoveText(m), why: why || '' });
+  log('Tuning (' + who + '): ' + myMoveText(m) + (why ? '. ' + why : ''));
+  return true;
+}
+function myUiMove(kind, a, b, mode) {
+  const m = kind === 'island' ? { kind, i: a, mode } : kind === 'channel' ? { kind, layer: a, i: b, mode } : { kind, f: a, c: b, mode };
+  myApplyMove(m, 'you'); myCoachRefresh();
+}
+function myClearPlan() { myPlan = []; myFxSync(state.net); myJournal.push({ t: new Date().toLocaleTimeString(), who: 'you', move: 'cleared the plan', why: '' }); myCoachRefresh(); }
+function myCoachRefresh() { if (myTab === 8) myRenderCoach(); else if (myTab === 1) myRenderGraph(); }
+
+function my3dEmphIslands() {
+  const box = $('my3dEmph'); if (!box) return; const G = myCur().net.topo.G;
+  let h = '<div><b>Training emphasis</b></div>';
+  for (let i = 0; i < G; i++) h += '<div style="margin:6px 0"><span style="color:' + myPal[i % myPal.length] + '">&#9679;</span> island ' + i + '<div class="row" style="margin:2px 0">' + myMoveBtns('island', i, 0, myModeOf({ kind: 'island', i })) + '</div></div>';
+  box.innerHTML = h + '<div class="note">Green shell = encouraged, amber = reduced, blue = frozen, white = suggested by the coach. Click a node or a connection for finer control. Used by the next training.</div>';
+}
+function my3dEmphHtml(id) {
+  const net = myCur().net; let b = '';
+  if (id.startsWith('e:')) {
+    const e = +id.slice(2), f = Math.floor(e / C1F), c = e % C1F; if (net.edge[e] === 0 || net.edge[e] === 3) return '';
+    b = myMoveBtns('edge', f, c, myModeOf({ kind: 'edge', f, c }), net.edge[e] === 2 && myCur().live);
+  } else if (id.startsWith('c1:') || id.startsWith('c2:')) { const ly = id.slice(0, 2), i = +id.slice(3); b = myMoveBtns('channel', ly, i, myModeOf({ kind: 'channel', layer: ly, i })); }
+  else return '';
+  const s = myCoachSug.find(x => x.move.kind !== 'island' && ((x.move.kind === 'edge' && id === 'e:' + (x.move.f * C1F + x.move.c)) || (x.move.kind === 'channel' && id === x.move.layer + ':' + x.move.i)));
+  return '<div class="note" style="margin-top:8px">Training emphasis (used by the next training):</div><div class="row">' + b + '</div>' + (s ? '<div class="note">Coach suggests <b>' + s.move.mode + '</b>: ' + esc(s.why) + '</div>' : '');
+}
+function my3dDecorate() {
+  const net = myCur().net, colOf = { encourage: 0x7bd88f, reduce: 0xe9b44c, freeze: 0x7fb7ff, prune: 0xef6b73 }, sym = { encourage: '\u25b2', reduce: '\u25bc', freeze: '\u2744', prune: '\u2715' };
+  const shell = (n, col, s, op) => { const m = new THREE.Mesh(my3dGeo.sphere, new THREE.MeshBasicMaterial({ color: col, wireframe: true, transparent: true, opacity: op })); m.scale.setScalar(s); m.userData = { sharedGeo: true }; n.mesh.add(m); };
+  const mark = (m, sug) => {
+    if (m.kind === 'edge') {
+      const ed = my3dEdgeById['e:' + (m.f * C1F + m.c)]; if (!ed) return;
+      const s = my3dLabel(sym[m.mode] + (sug ? '?' : ''), sug ? '#ffffff' : '#' + colOf[m.mode].toString(16).padStart(6, '0')); s.position.copy(ed.curve.getPoint(sug ? 0.35 : 0.65)); my3dScene.add(s); return;
+    }
+    const list = m.kind === 'island' ? Object.values(my3dNodes).filter(n => (n.ty === 'c1' || n.ty === 'c2') && n.isl === m.i) : [my3dNodes[m.layer + ':' + m.i]];
+    for (const n of list) if (n) shell(n, sug ? 0xffffff : colOf[m.mode], sug ? 1.9 : 1.55, sug ? 0.5 : 0.85);
+  };
+  for (const m of myPlan) mark(m, false);
+  for (const s of myCoachSug) mark(s.move, true);
+}
+
+function myRenderCoach() {
+  const g = myCur(), net = g.net, G = net.topo.G; let h = '';
+  if (!g.live) h += '<div class="warn">No trained model in memory yet. You can already set the emphasis: the next training starts from random weights and uses this plan from the first step. Analysis and pruning need a trained model.</div>';
+  h += myTbl(['Island', 'conv1 channels', 'conv2 filters', 'training emphasis'], Array.from({ length: G }, (_, i) => {
+    const s = myIslandSpec(i, G); return ['<span style="color:' + myPal[i % myPal.length] + '">&#9679;</span> ' + i, s.c1.join(', '), s.c2.join(', '), myMoveBtns('island', i, 0, myModeOf({ kind: 'island', i }))];
+  }));
+  $('myCoachIsl').innerHTML = h;
+  const rows = []; for (let e = 0; e < net.edge.length; e++) if (net.edge[e] === 2) { const f = Math.floor(e / C1F), c = e % C1F; rows.push(['c1&middot;' + c + ' &rarr; c2&middot;' + f, 'I' + myIsl1(c, G) + ' &rarr; I' + myIsl2(f, G), myMoveBtns('edge', f, c, myModeOf({ kind: 'edge', f, c }), g.live)]); }
+  $('myCoachBr').innerHTML = rows.length ? '<h3>Bridges</h3>' + myTbl(['Bridge', 'islands', 'training emphasis'], rows) : '';
+  $('myCoachPlan').innerHTML = myPlan.length ? '<b>Plan in force (' + myPlan.length + ' moves):</b> ' + myPlan.map(m => esc(myMoveText(m))).join('; ') : 'The plan is empty: every weight trains normally.';
+  $('myCoachSug').innerHTML = myCoachSug.length ? myTbl(['Suggested move', 'why', 'score', ''], myCoachSug.map((s, i) => [esc(myMoveText(s.move)), esc(s.why), s.score.toFixed(2), '<button style="min-height:34px;padding:4px 10px" onclick="myCoachAccept(' + i + ')">Accept</button> <button style="min-height:34px;padding:4px 10px" onclick="myCoachDismiss(' + i + ')">Dismiss</button>'])) : '<p class="note">No suggestions yet. Press Analyse to look at the evidence.</p>';
+  const d = myCoachDiagLast; let ev = '';
+  if (d) {
+    ev = '<details><summary>Evidence behind the suggestions (' + d.lab + ' set, ' + d.n + ' images, accuracy ' + myPct(d.acc) + ', loss ' + myNum(d.loss) + ')</summary>' +
+      myTbl(['Island', 'accuracy change if off', 'loss change if off', 'class separation'], d.isl.map(x => [x.i, (100 * x.dAcc).toFixed(1) + ' pts', myNum(x.dLoss), myNum(x.sep, 2)])) +
+      (d.br.length ? myTbl(['Bridge', 'accuracy change if off', 'loss change if off', 'mean |w|'], d.br.map(x => ['c1&middot;' + x.c + ' &rarr; c2&middot;' + x.f, (100 * x.dAcc).toFixed(1) + ' pts', myNum(x.dLoss), myNum(x.mw)])) : '') +
+      myTbl(['Channel', 'island', 'relative activation', 'class separation', 'loss change if off'], d.chan.map(x => [(x.layer === 'c1' ? 'conv1 ' : 'conv2 ') + x.i, x.isl, myNum(x.rel, 2), myNum(x.sep, 2), myNum(x.dLoss)])) +
+      '<p class="note">Zero-ablation measures dependence of this one model, not a human-meaningful role. The coach only proposes moves; a round of auto-coach keeps a move only if it beats a control run without it.</p></details>';
+  }
+  $('myCoachEv').innerHTML = ev;
+  $('myCoachLog').innerHTML = myJournal.length ? myTbl(['time', 'who', 'move', 'note'], myJournal.slice(-40).reverse().map(j => [j.t, esc(j.who), esc(j.move), esc(j.why)])) : '<p class="note">Nothing yet.</p>';
+}
+async function myCoachAnalyse() {
+  const net = myLive(), out = $('myCoachStatus');
+  if (!net) { out.textContent = 'Train or load a model first.'; return; }
+  if (state.training) { out.textContent = 'Wait until training finishes.'; return; }
+  const sp = currentSplit(); let set = sp.val, lab = 'validation'; if (!set.length) { set = state.samples; lab = 'all-image'; }
+  if (!set.length) { out.textContent = 'No images to analyse.'; return; }
+  await myNeedPx(set, 'myCoachStatus'); out.textContent = 'Analysing ...'; await tick();
+  myCoachDiagLast = myCoachDiag(net, set, new Float32Array(IN * IN * 3)); myCoachDiagLast.lab = lab;
+  myCoachSug = myCoachSuggest(myCoachDiagLast, myPlan, myCoachBlocked).slice(0, 8);
+  out.textContent = 'Analysis done on the ' + lab + ' set: ' + myCoachSug.length + ' suggested moves.'; myCoachRefresh();
+  if (myTab !== 8) myRenderCoach();
+}
+function myCoachAccept(i) { const s = myCoachSug[i]; if (!s) return; myApplyMove(s.move, 'you (coach idea)', s.why); myCoachSug.splice(i, 1); myCoachRefresh(); }
+function myCoachDismiss(i) { const s = myCoachSug[i]; if (!s) return; myCoachBlocked.add(myMoveKey(s.move) + ':' + s.move.mode); myCoachSug.splice(i, 1); myCoachRefresh(); }
+function myCoachAcceptAll() { for (const s of myCoachSug) myApplyMove(s.move, 'you (coach idea)', s.why); myCoachSug = []; myCoachRefresh(); }
+function myCoachSnap(net) { return { s: takeSnap(net, 0), edge: net.edge.slice(), topo: Object.assign({}, net.topo, { sel: net.topo.sel.map(x => x.slice()) }), plan: myPlanCopy() }; }
+function myCoachRestore(net, s) {
+  restoreSnap(net, s.s); net.edge.set(s.edge); Object.assign(net.topo, s.topo, { sel: s.topo.sel.map(x => x.slice()) });
+  myPlan = s.plan.map(m => Object.assign({}, m)); myFxSync(net); myEnforceMask(net); myRefreshGates(net); net.ver++;
+}
+// mode 'plan': train some epochs with the plan as it is. mode 'auto': rounds of (suggest, try with moves, try without, keep the winner).
+async function myCoachRun(mode) {
+  if (state.training) return; const net = myLive(), msg = $('myCoachStatus');
+  if (!net) { msg.textContent = 'Train or load a model first (section 3 or 7).'; return; }
+  const sp = currentSplit(); if (!sp.train.length) { msg.textContent = 'No training images.'; return; }
+  if (mode === 'auto' && !sp.val.length) { msg.textContent = 'The auto-coach judges moves on validation images. Set a validation amount in section 3.'; return; }
+  const o = { lr: parseFloat($('lr').value), batch: parseInt($('batch').value), epochs: 1, dropout: parseFloat($('dropout').value) || 0, augment: $('augment').checked, maxStep: MAX_STEP };
+  if (!(o.lr > 0) || !(o.batch >= 1) || o.dropout < 0 || o.dropout >= 1) { msg.textContent = 'Check the training settings in section 3.'; return; }
+  const ep = Math.max(1, Math.min(50, parseInt($('myCoachEp').value) || 3)), rounds = mode === 'auto' ? Math.max(1, Math.min(10, parseInt($('myCoachRounds').value) || 3)) : 1;
+  const maxMv = Math.max(1, Math.min(6, parseInt($('myCoachMax').value) || 2)), tol = Math.max(0, parseFloat($('myCoachTol').value) || 0) / 100;
+  state.training = true; state.stop = false; state.pause = false; setTrainButtons();
+  const buf = new Float32Array(IN * IN * 3), trainBuf = new Float32Array(IN * IN * 3); let lab = '';
+  const hk = { input: s => bytesToFloat(s.px, trainBuf), stopped: () => state.stop, paused: () => state.pause, onLog: m => log(m),
+    onBatch: b => { msg.textContent = lab + 'epoch ' + b.epoch + '/' + ep + '  batch ' + b.b + '/' + b.bpe + '  loss ' + b.loss.toFixed(4); },
+    onEpoch: e => log(lab + 'epoch ' + e.epoch + '/' + ep + '  loss ' + e.loss.toFixed(4) + '  train acc ' + (e.tacc * 100).toFixed(1) + '%' + (e.vacc == null ? '' : '  val acc ' + (e.vacc * 100).toFixed(1) + '%')) };
+  const trainEp = seed => { for (const k of PARAM_ORDER) { net.m[k].fill(0); net.v[k].fill(0); } mySetSeed(seed); return runTraining(net, sp.train, sp.val, Object.assign({}, o, { epochs: ep }), hk); };
+  const fmt = m => 'acc ' + myPct(m.acc) + ', loss ' + myNum(m.loss);
+  try {
+    const all = sp.train.concat(sp.val); for (let i = 0; i < all.length; i++) { await getBytes(all[i]); if (i % 10 === 0) { msg.textContent = 'Decoding images ' + (i + 1) + ' / ' + all.length + ' ...'; await tick(); } }
+    myFxSync(net);
+    if (mode === 'plan') {
+      lab = 'Plan: '; const m0 = sp.val.length ? myMeasure(net, sp.val, buf) : null;
+      await trainEp(1 + Math.floor(Math.random() * 100000)); const m1 = sp.val.length ? myMeasure(net, sp.val, buf) : null;
+      myJournal.push({ t: new Date().toLocaleTimeString(), who: 'you', move: 'trained ' + ep + ' epochs with the plan (' + myPlan.length + ' moves)', why: m0 ? 'validation ' + fmt(m0) + ' to ' + fmt(m1) : '' });
+    } else {
+      let cur = myMeasure(net, sp.val, buf); log('Auto-coach starts at validation ' + fmt(cur) + '.');
+      for (let r = 1; r <= rounds && !state.stop; r++) {
+        msg.textContent = 'Round ' + r + ': looking at the evidence ...'; await tick();
+        const sug = myCoachSuggest(myCoachDiag(net, sp.val, buf), myPlan, myCoachBlocked).slice(0, maxMv);
+        if (!sug.length) { myJournal.push({ t: new Date().toLocaleTimeString(), who: 'coach', move: 'round ' + r + ': no move worth trying', why: 'stopped' }); break; }
+        const before = myCoachSnap(net), seed = 100 + 7 * r;
+        for (const s of sug) myApplyMove(s.move, 'coach', s.why);
+        myFxSync(net); lab = 'Round ' + r + ' with moves: ';
+        await trainEp(seed); if (state.stop) { myCoachRestore(net, before); break; }
+        const mA = myMeasure(net, sp.val, buf), snapA = myCoachSnap(net);
+        myCoachRestore(net, before); lab = 'Round ' + r + ' control: ';
+        await trainEp(seed); if (state.stop) break;
+        const mB = myMeasure(net, sp.val, buf), keep = mA.acc - mB.acc >= -tol - 1e-9 && mA.loss <= mB.loss + 0.02 && (mA.acc > mB.acc + 1e-9 || mA.loss <= mB.loss || sug.some(s => s.move.mode === 'prune'));
+        if (keep) { myCoachRestore(net, snapA); cur = mA; } else { cur = mB; for (const s of sug) myCoachBlocked.add(myMoveKey(s.move) + ':' + s.move.mode); }
+        myJournal.push({ t: new Date().toLocaleTimeString(), who: 'coach', move: 'round ' + r + ': ' + sug.map(s => myMoveText(s.move)).join('; '), why: (keep ? 'KEPT' : 'REJECTED') + '. With moves ' + fmt(mA) + ', control ' + fmt(mB) });
+        log('Round ' + r + (keep ? ' kept the moves. ' : ' rejected the moves. ') + 'With moves ' + fmt(mA) + ', control ' + fmt(mB) + '.');
+      }
+    }
+    net.ver++; state.wStatus = 'trained'; state.dirty = true; state.wNote = 'Tuned in this browser (not saved yet).'; state.evalStale = false;
+    myCoachSug = []; msg.textContent = state.stop ? 'Stopped. Model is in memory; save it in section 7.' : 'Done. Model is in memory; save it in section 7.'; log(msg.textContent);
+    renderSource(); renderModelInfo(); renderClasses(); await runEval();
+  } catch (e) { log('Coach error: ' + e.message); msg.textContent = 'Error: ' + e.message; }
+  state.training = false; state.pause = false; setTrainButtons(); myRenderGraphUI();
+}
+function myCoachJsonApply() {
+  const st = $('myCoachStatus'); let arr; try { arr = JSON.parse($('myCoachJson').value); } catch (e) { st.textContent = 'Not valid JSON: ' + e.message; return; }
+  if (!Array.isArray(arr)) arr = arr && Array.isArray(arr.moves) ? arr.moves : [arr];
+  const G = myCur().net.topo.G, bad = arr.filter(m => !myMoveValid(m, G));
+  if (bad.length) { st.textContent = bad.length + ' of ' + arr.length + ' moves are not valid for this model (kind, index or mode). Nothing was applied. First bad one: ' + JSON.stringify(bad[0]); return; }
+  let n = 0; for (const m of arr) if (myApplyMove(m, 'pasted', m.why)) n++;
+  st.textContent = n + ' of ' + arr.length + ' moves applied' + (n < arr.length ? ' (prune needs a trained model with that bridge)' : '') + '.'; myCoachRefresh();
+}
+function myCoachDownload() {
+  const net = myCur().net;
+  myDl('tuning-session-v003.json', JSON.stringify({ page: 'vision-cnn-sd-trainer ' + VERSION, model: myDesc(net.topo), classes: state.classes,
+    moveFormat: { island: { kind: 'island', i: 0, mode: 'encourage|normal|reduce|freeze' }, channel: { kind: 'channel', layer: 'c1|c2', i: 0, mode: 'encourage|normal|reduce|freeze' }, edge: { kind: 'edge', f: 0, c: 0, mode: 'encourage|normal|reduce|freeze|prune (prune only for bridges)' }, note: 'f = conv2 filter, c = conv1 channel' },
+    plan: myPlan, journal: myJournal, suggestions: myCoachSug.map(s => ({ move: s.move, why: s.why, score: s.score })), evidence: myCoachDiagLast }, null, 2));
+}
+
 </script>
 </body>
 </html>
