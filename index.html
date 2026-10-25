@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  webMCU-AI  |  Vision CNN SD trainer  |  v003 (tuning plan and coach on top of the v002 3D graph workbench; v001 was built from index-v007 / page v006)
+  webMCU-AI  |  Vision CNN SD trainer  |  v004 (RGB pathways, model store, default device model, Train all four fix; on top of v003; v001 was built from index-v007 / page v006)
   Companion page for the XIAO ESP32-S3 "FULL VISION ML" firmware (firmware-v007; firmware-v005 and later send debug frames).
   Reads images/<class>/*.jpg from the SD card, trains the same CNN (input size and filters selectable) in plain JS,
   analyzes the dataset, and writes header/myWeights.bin back for the device to load.
@@ -14,13 +14,17 @@
   v003: a tuning plan (encourage / reduce / freeze an island, channel or connection, prune a bridge) that a person or the new Coach tab can write.
         The plan scales the Adam step per weight; forward pass, backward pass, weight file and an empty plan are unchanged (empty plan = v002 training).
         Coach tab: evidence from zero-ablation, ideas as moves, an auto-coach that keeps a move only if it beats a control run, journal, JSON moves in and out.
+  v004 fix: RGB-to-conv1 pulses now run on every input edge (before, channels with a zero or negative mean response were skipped).
+  v004: 3D graph can split RGB into R, G, B nodes (full connectivity); Camera button is green; burst delay defaults to 300 ms (no wait after the last frame);
+        Train all four honours "Continue from the weights in memory"; Stored Models A-D (independent snapshots), a deliberately chosen Default Device Model for export,
+        model-set bundle save/load. Forward pass, backward pass and the myWeights.bin format are unchanged.
   Three.js r128 is loaded from cdnjs for the 3D view only. Without it (offline) the page works and shows the 2D schematic. MIT license. Use at your own risk.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vision CNN SD trainer v003 (tuning plan and coach)</title>
+<title>Vision CNN SD trainer v004 (model store)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 :root{--bg:#11151b;--panel:#182029;--panel2:#1f2a36;--line:#2c3947;--text:#dde5ee;--mut:#8b9aac;--acc:#66d1bd;--acc-ink:#062a24;--bad:#ef6b73;--warn:#e9b44c;--ok:#7bd88f;--r:8px}
@@ -118,7 +122,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 </head>
 <body>
 <header>
-  <h1>Vision CNN SD trainer<span class="ver">v003 tuning plan + coach</span></h1>
+  <h1>Vision CNN SD trainer<span class="ver">v004 model store + RGB pathways</span></h1>
   <p>Browser companion for the XIAO ESP32-S3 FULL VISION ML firmware (firmware-v007; firmware-v005 and later also give config.json class names and debug frames): load the SD card, add images, review and clean them, train the same CNN, then write myWeights.bin back to the card.</p>
   <p>Everything runs in this page. Images and weights never leave your computer.</p>
 </header>
@@ -151,15 +155,15 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
   <div class="cam">
     <div class="vwrap" id="capWrap"><video id="capVideo" class="mir" playsinline muted></video><span id="rec" class="rec">● REC</span></div>
     <div style="flex:1;min-width:230px">
-      <div class="row"><button id="btnCam">Start camera</button></div>
+      <div class="row"><button id="btnCam" class="primary">Start camera</button></div>
       <div class="row">
         <select id="capClass" aria-label="Class to capture into"></select>
         <button id="btnCapture" class="primary">Capture (Space)</button>
         <button id="btnBurst" class="burst">Burst 10 (B)</button>
-        <label class="chk" style="gap:6px">Delay <input type="number" id="burstMs" value="0" min="0" max="2000" step="10" style="width:84px" aria-label="Burst delay in milliseconds"> ms</label>
+        <label class="chk" style="gap:6px">Delay <input type="number" id="burstMs" value="300" min="0" max="2000" step="10" style="width:84px" aria-label="Burst delay in milliseconds"> ms</label>
       </div>
       <label class="chk"><input type="checkbox" id="mirror" checked> Mirror frames horizontally like the device (hmirror on). The device also flips vertically, so device and page images match.</label>
-      <p class="note" id="capNote">Frames are center-cropped to a square, resized to 240x240 and saved as JPEG straight into images/&lt;class&gt;/ (SD folder) or the zip. Burst takes 10 fresh camera frames back to back, plus the delay you set between them, while the button is red, then saves them. Burst frames are near-duplicates, so move or tilt the object between bursts.</p>
+      <p class="note" id="capNote">Frames are center-cropped to a square, resized to 240x240 and saved as JPEG straight into images/&lt;class&gt;/ (SD folder) or the zip. Burst takes 10 fresh camera frames back to back, plus the delay you set between them (default 300 ms, none after the last frame), while the button is red, then saves them. Burst frames are near-duplicates, so move or tilt the object between bursts.</p>
     </div>
   </div>
 
@@ -288,6 +292,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
       <label class="chk"><input type="checkbox" id="myShW" checked> within-island</label><label class="chk"><input type="checkbox" id="myShB" checked> bridges</label>
       <label class="chk"><input type="checkbox" id="myShC" checked> candidates / unselected</label><label class="chk"><input type="checkbox" id="myShK"> classifier edges (detailed view)</label>
       <label class="chk"><input type="checkbox" id="myShWt" checked> thickness = mean |weight|</label><label class="chk"><input type="checkbox" id="myShLab" checked> labels</label>
+      <label class="chk"><input type="checkbox" id="myShRgb"> full RGB view (R, G, B nodes)</label>
       <label class="chk"><input type="checkbox" id="myAuto" onchange="my3dAutoChange()"> auto-rotate</label>
     </div>
     <div class="row">
@@ -329,6 +334,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
     <div class="row"><button id="btnAll4" class="primary">Train all four (same split, settings, seed)</button>
       <label class="chk" style="gap:6px">Repeat <input type="number" id="myRepN" value="3" min="2" max="10" style="width:70px" aria-label="Number of seeds"> seeds of <select id="myRepType" style="width:auto" aria-label="Model type"><option>A</option><option>B</option><option>C</option><option selected>D</option></select></label><button id="btnRep">Repeat</button></div>
     <p class="note">Runs use the training settings and validation rule of section 3. Same seed means same starting weights and same shuffling, so differences come from connectivity. One seed is an anecdote: use the repeat button before drawing conclusions.</p>
+    <div id="myStoreBox"></div>
     <div id="myCmp"></div>
   </div>
   <div class="tabpane" id="gp7">
@@ -424,6 +430,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
     <div>SD folder mode: the existing weights file is copied to <b>myWeights.bin.bak</b> first, then the new one is written. A <b>config.json</b> with the class names and layout is written next to it. The firmware reads the class names from it at boot. NUM_CLASSES, INPUT_SIZE and the filter counts always come from the compiled sketch.</div>
     <div>Zip mode: Save weights keeps the model for the zip. Save .zip downloads header/myWeights.bin (and images if ticked) in the SD card layout.</div>
   </div>
+  <div class="info" id="myDevInfo"></div>
   <p class="note" id="saveStatus"></p>
 </section>
 
@@ -506,7 +513,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 
 <script>
 'use strict';
-const VERSION = 'v003';
+const VERSION = 'v004';
 
 /* ==CORE START== (no DOM use below this line until CORE END) */
 
@@ -1770,9 +1777,11 @@ const configJson = () => JSON.stringify({ page: 'vision-cnn-sd-trainer ' + VERSI
 
 async function saveWeights() {
   const st = $('saveStatus');
-  if (!hasModel()) { st.textContent = 'No model to save. Train or load weights first.'; return; }
-  if (!weightsFinite(state.net)) { st.textContent = 'Refused: the model contains NaN or Infinity. Nothing was written.'; log(st.textContent); return; }
-  const bytes = serializeWeights(state.net);
+  const dn = myExportNet(); if (dn === false) { st.textContent = 'Export stopped: choose a Default Device Model first (Compare tab).'; return; }
+  if (!dn) { st.textContent = 'No model to save. Train or load weights first.'; return; }
+  log('Device export of ' + myDesc(dn.topo) + '.');
+  if (!weightsFinite(dn)) { st.textContent = 'Refused: the model contains NaN or Infinity. Nothing was written.'; log(st.textContent); return; }
+  const bytes = serializeWeights(dn);
   if (bytes.byteLength !== totalFloats(state.classes.length) * 4) { st.textContent = 'Refused: weight size does not match the class count.'; return; }
   if (state.mode === 'dir') {
     try {
@@ -1781,7 +1790,7 @@ async function saveWeights() {
       if (old) { await writeFile(hd, 'myWeights.bin.bak', old); log('Existing myWeights.bin copied to header/myWeights.bin.bak.'); }
       await writeFile(hd, 'myWeights.bin', new Blob([bytes]));
       await writeFile(hd, 'config.json', new Blob([configJson()]));
-      await writeFile(hd, 'graph-config.json', new Blob([myGraphCfgText()]));
+      await writeFile(hd, 'graph-config.json', new Blob([myGraphCfgText(dn)]));
       state.dirty = false; state.wStatus = 'loaded'; state.wNote = 'Saved header/myWeights.bin (' + bytes.byteLength + ' bytes).';
       st.textContent = 'Saved header/myWeights.bin (' + bytes.byteLength + ' bytes) and header/config.json' + (old ? ', previous file kept as myWeights.bin.bak.' : '.');
     } catch (e) { st.textContent = 'Save failed: ' + e.message; }
@@ -1792,19 +1801,20 @@ async function saveWeights() {
 }
 
 async function buildZip() {
-  const files = [], enc = new TextEncoder();
+  const files = [], enc = new TextEncoder(), dn = myExportNet(); if (dn === false) return null;
   state.classes.forEach(k => files.push({ name: 'images/' + k + '/', data: new Uint8Array(0) }));
   if ($('zipImgs').checked) for (const s of state.samples) files.push({ name: 'images/' + state.classes[s.cls] + '/' + s.name, data: new Uint8Array(await s.blob.arrayBuffer()) });
-  if (hasModel() && weightsFinite(state.net)) files.push({ name: 'header/myWeights.bin', data: new Uint8Array(serializeWeights(state.net)) });
+  if (dn && weightsFinite(dn)) files.push({ name: 'header/myWeights.bin', data: new Uint8Array(serializeWeights(dn)) });
   else log('No model in memory, so the zip has no myWeights.bin.');
   files.push({ name: 'header/config.json', data: enc.encode(configJson()) });
-  files.push({ name: 'header/graph-config.json', data: enc.encode(myGraphCfgText()) });
+  files.push({ name: 'header/graph-config.json', data: enc.encode(myGraphCfgText(dn || undefined)) });
   return makeZip(files);
 }
 async function saveZip() {
   if (!state.mode) { $('saveStatus').textContent = 'Load a data source first.'; return; }
   $('saveStatus').textContent = 'Building zip ...';
-  const blob = await buildZip(), name = 'sd-card-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.zip';
+  const blob = await buildZip(); if (!blob) { $('saveStatus').textContent = 'Export stopped: choose a Default Device Model first (Compare tab).'; return; }
+  const name = 'sd-card-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.zip';
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   if (state.mode === 'zip' && hasModel()) state.dirty = false;
@@ -1857,7 +1867,7 @@ async function burst() {
       wrap.classList.add('flash'); setTimeout(() => wrap.classList.remove('flash'), 60);
       let name = 'img_' + Date.now() + '.jpg'; if (name === last) name = 'img_' + (Date.now() + 1) + '.jpg'; last = name;
       got.push({ name, blob: await frameBlob() });
-      if (gap > 0) await sleep(gap);
+      if (gap > 0 && i < BURST_N - 1) await sleep(gap);   // v004: wait only between frames
     }
   } finally { rec.classList.remove('on'); btn.classList.remove('recording'); btn.textContent = 'Saving ...'; }
   let saved = 0;
@@ -1936,10 +1946,11 @@ async function saveConfig() {
   const st = $('saveStatus');
   if (!state.classes.length) { st.textContent = 'No classes to write.'; return; }
   if (state.mode !== 'dir') { st.textContent = 'Zip mode: config.json is included in Save .zip.'; return; }
+  const dn = myExportNet(); if (dn === false) { st.textContent = 'Export stopped: choose a Default Device Model first (Compare tab).'; return; }
   try {
     const hd = await state.root.getDirectoryHandle('header', { create: true });
     await writeFile(hd, 'config.json', new Blob([configJson()]));
-    await writeFile(hd, 'graph-config.json', new Blob([myGraphCfgText()]));
+    await writeFile(hd, 'graph-config.json', new Blob([myGraphCfgText(dn || undefined)]));
     st.textContent = 'Wrote header/config.json and graph-config.json with ' + state.classes.length + ' classes: ' + state.classes.join(', ') + '.';
   } catch (e) { st.textContent = 'Write failed: ' + e.message; }
   log(st.textContent);
@@ -2170,7 +2181,7 @@ function myRenderGraphUI() {
   const co = state.classes.map((k, i) => '<option value="' + i + '">' + esc(k) + '</option>').join('') || '<option value="0">(no classes)</option>';
   keep('myPredCls', co); keep('myExCls', co); keep('myFlowCls', co);
   let ho = '<option value="">Highlight: none</option>'; for (let c = 0; c < C1F; c++) ho += '<option value="c1:' + c + '">Highlight conv1 channel ' + c + '</option>'; for (let f = 0; f < C2F; f++) ho += '<option value="c2:' + f + '">Highlight conv2 filter ' + f + '</option>'; state.classes.forEach((k, i) => ho += '<option value="cl:' + i + '">Highlight class ' + esc(k) + '</option>');
-  keep('myHi', ho); myRenderTab();
+  keep('myHi', ho); myRenderTab(); myRenderStore();
 }
 function myRenderTab() {
   document.querySelectorAll('#myTabs .tabbtn').forEach(b => b.classList.toggle('on', +b.dataset.t === myTab));
@@ -2423,17 +2434,27 @@ async function onTrain() {
     net.ver++; state.wStatus = 'trained'; state.dirty = true; state.wNote = 'Trained in this browser (not saved yet).'; state.evalStale = false;
     const secs = (performance.now() - t0) / 1000;
     setSt((res.stopped ? 'Stopped' : (res.failed ? 'Stopped after repeated non-finite loss' : 'Training complete')) + ' in ' + secs.toFixed(1) + ' s. Model is in memory; save it in section 7.'); log($('trainStatus').textContent);
-    myRecordRun(net, sp, secs, seed);
+    myRecordRun(net, sp, secs, seed); myStorePut(net, seed, o, sp);
     renderSource(); renderModelInfo(); renderClasses(); await runEval();
   } catch (e) { log('Training error: ' + e.message); setSt('Training error: ' + e.message); }
   state.training = false; state.pause = false; setTrainButtons(); myRenderGraphUI();
 }
 async function myTrainAll() {
   if (state.training) return; const N = state.classes.length; if (N < 2) { alert('Load a data source with at least 2 classes first.'); return; }
-  if (state.net && state.dirty && !confirm('Training all four models replaces the unsaved model in memory (the last one trained, D, stays). Continue?')) return;
   const saved = { type: $('myType').value, seed: $('mySeed').value, cont: $('cont').checked }, seed = parseInt(saved.seed) > 0 ? parseInt(saved.seed) : 1 + Math.floor(Math.random() * 2147483646);
-  myBatch = true; $('cont').checked = false; $('mySeed').value = seed; log('Train all four with seed ' + seed + '.');
-  try { for (const ty of ['A', 'B', 'C', 'D']) { $('myType').value = ty; myRenderTopoInfo(); await onTrain(); if (state.stop) break; } } finally { myBatch = false; $('cont').checked = saved.cont; $('mySeed').value = saved.seed; myRenderGraphUI(); }
+  if (!saved.cont && state.net && state.dirty && !myIsStored(state.net) && !confirm('Training all four from fresh weights replaces the active model, which is not stored. Continue?')) return;
+  myBatch = true; $('mySeed').value = seed; log('Train all four with seed ' + seed + (saved.cont ? ', continuing stored models where compatible.' : ', all from fresh weights.'));
+  try {
+    for (const ty of ['A', 'B', 'C', 'D']) {
+      $('myType').value = ty; myRenderTopoInfo(); let cont = false;
+      if (saved.cont) {   // continue only from a stored model of the SAME architecture, layout, classes and topology settings
+        const e = myStore[ty], net = e && myStoreOk(e) ? myNetFromStore(ty) : null;
+        if (net && myTopoSame(net.topo, myReadTopo())) { state.net = net; state.wStatus = 'trained'; e.runId = net.runId; e.ver = net.ver; cont = true; log('Model ' + ty + ': continuing from its stored weights.'); }
+        else log('Model ' + ty + ': ' + (e ? 'the stored model does not match the current layout, classes or topology settings' : 'no stored weights') + ', so it starts fresh.');
+      }
+      $('cont').checked = cont; await onTrain(); if (state.stop) break;
+    }
+  } finally { myBatch = false; $('cont').checked = saved.cont; $('mySeed').value = saved.seed; $('myType').value = saved.type; myRenderTopoInfo(); myRenderGraphUI(); }
 }
 async function myRepeat() {
   if (state.training) return; const R = Math.max(2, Math.min(10, parseInt($('myRepN').value) || 3)), ty = $('myRepType').value; if (state.classes.length < 2) { alert('Load a data source first.'); return; }
@@ -2442,8 +2463,76 @@ async function myRepeat() {
   try { for (let i = 0; i < R; i++) { $('mySeed').value = base + i; await onTrain(); const r = myRuns[ty]; if (r) reps.push({ seed: base + i, acc: r.sm && r.sm.acc, sel: r.sel }); if (state.stop) break; } } finally { myBatch = false; $('cont').checked = saved.cont; $('mySeed').value = saved.seed; $('myType').value = saved.type; }
   myReps[ty] = { reps, layout: layoutKey(), classes: state.classes.slice(), K: myReadTopo().K, G: myReadTopo().G }; myRenderGraphUI();
 }
+
+// ======================================================================
+//  v004 MODEL STORE: independent snapshots of A-D, default device model, model-set bundle
+//  Each entry keeps a v001 model bundle (weights as float32 base64 + topology + class labels), never a live reference to the active net.
+// ======================================================================
+const myStore = {}; let myDefDev = null;
+const myIsStored = net => Object.values(myStore).some(e => e.runId === net.runId && e.ver === net.ver);
+const myStoreOk = e => e.layout === layoutKey() && JSON.stringify(e.classes) === JSON.stringify(state.classes);
+function myStorePut(net, seed, o, sp) {
+  if (!weightsFinite(net)) { log('Model not stored: weights contain NaN or Infinity.'); return; }
+  const ty = net.topo.type, r = myRuns[ty], had = !!myStore[ty];
+  myStore[ty] = { type: ty, desc: myDesc(net.topo), bundle: myBuildBundle(net, state.classes, { valAcc: r && r.sm ? r.sm.acc : null, nval: sp.val.length, ntr: sp.train.length }),
+    layout: layoutKey(), classes: state.classes.slice(), seed, epochs: o.epochs, lr: o.lr, batch: o.batch, acc: r && r.sm ? r.sm.acc : null, nval: sp.val.length, runId: net.runId, ver: net.ver, saved: false };
+  log('Stored model ' + ty + (had ? ' (replaced the earlier stored ' + ty + ')' : '') + '. Other stored models are untouched.'); myRenderStore();
+}
+function myNetFromStore(k) { try { return myImportBundle(myStore[k].bundle, state.classes); } catch (e) { log('Stored model ' + k + ' refused: ' + e.message); return null; } }
+async function myUseModel(k) {
+  const e = myStore[k]; if (!e || !myStoreOk(e) || state.training) return;
+  if (state.net && state.dirty && !myIsStored(state.net) && !confirm('The active model is not stored. Replace it with stored model ' + k + '?')) return;
+  const net = myNetFromStore(k); if (!net) return;
+  e.runId = net.runId; e.ver = net.ver; state.net = net; state.wStatus = 'trained'; state.dirty = true; state.wNote = 'Stored model ' + k + ' made active (not saved to the card).'; state.cm = null; state.wrong = [];
+  myAbl.c1.clear(); myAbl.c2.clear(); myAbl.e.clear(); myActs = null; myWriteTopo(net.topo); myFxSync(net); log('Stored model ' + k + ' is now the active model (' + e.desc + ').');
+  renderAll(); try { await runEval(); } catch (err) { log('Evaluation: ' + err.message); }
+}
+function myPickDefault(k) { const e = myStore[k]; if (!e || !myStoreOk(e)) return; myDefDev = k; log('Default Device Model: ' + k + ' (' + e.desc + ').'); myRenderStore(); }
+function myExportNet() {   // false = blocked (the user must choose), null = no model, else the net to export
+  if (!Object.keys(myStore).length) return hasModel() ? state.net : null;
+  if (!myDefDev || !myStore[myDefDev]) { alert('Choose a Default Device Model first (Compare tab, Stored models). Nothing was exported.'); return false; }
+  const e = myStore[myDefDev]; if (!myStoreOk(e)) { alert('The Default Device Model ' + myDefDev + ' does not match the current layout or class labels. Nothing was exported.'); return false; }
+  return myNetFromStore(myDefDev) || false;
+}
+function myDlModel(k) { const e = myStore[k]; if (!e) return; myDl('model-' + k + '-' + layoutKey() + '.json', JSON.stringify(e.bundle)); e.saved = true; myRenderStore(); }
+function myDlAll() {
+  const ks = Object.keys(myStore); if (!ks.length) { $('myStoreMsg').textContent = 'No stored models to save.'; return; }
+  const models = {}; ks.forEach(k => { const e = myStore[k]; models[k] = { bundle: e.bundle, seed: e.seed, epochs: e.epochs, lr: e.lr, batch: e.batch }; e.saved = true; });
+  myDl('model-set-' + layoutKey() + '.json', JSON.stringify({ modelSetVersion: 1, page: 'vision-cnn-sd-trainer ' + VERSION, layout: layoutKey(), classes: state.classes, defaultDevice: myDefDev, models })); myRenderStore();
+}
+async function myLoadSetFile(inp) {
+  const f = inp.files[0]; inp.value = ''; if (!f) return; const m = $('myStoreMsg'), ok = [], bad = [];
+  try {
+    const j = JSON.parse(await f.text()), items = j.modelSetVersion === 1 && j.models ? Object.entries(j.models) : (j.bundleVersion === 1 ? [[null, { bundle: j }]] : null);
+    if (!items) throw new Error('Not a model set (modelSetVersion 1) or a single v001 model bundle.');
+    for (const [k, it] of items) {
+      try { const net = myImportBundle(it.bundle, state.classes), ty = net.topo.type; if (k && k !== ty) throw new Error('slot ' + k + ' holds a model of type ' + ty);
+        myStore[ty] = { type: ty, desc: myDesc(net.topo), bundle: it.bundle, layout: layoutKey(), classes: state.classes.slice(), seed: it.seed || net.topo.seed || null, epochs: it.epochs || null, lr: it.lr || null, batch: it.batch || null,
+          acc: it.bundle.metrics ? it.bundle.metrics.valAcc : null, nval: it.bundle.metrics ? it.bundle.metrics.nval : null, runId: -1, ver: -1, saved: true }; ok.push(ty); }
+      catch (e) { bad.push((k || 'bundle') + ': ' + e.message.replace(/\n/g, ' ')); }
+    }
+    if (j.defaultDevice && ok.includes(j.defaultDevice)) myDefDev = j.defaultDevice;
+    m.innerHTML = (ok.length ? '<span class="ok">Loaded ' + ok.join(', ') + (myDefDev && j.defaultDevice === myDefDev ? '; default device model ' + myDefDev + ' restored from the file' : '') + '.</span> ' : '') + (bad.length ? '<span class="bad">Refused:</span> ' + bad.map(esc).join(' | ') : '');
+  } catch (e) { m.innerHTML = '<span class="bad">Could not load: ' + esc(e.message) + '</span>'; }
+  myRenderStore();
+}
+function myRenderStore() {
+  const el = $('myStoreBox'); if (!el) return; const ks = ['A', 'B', 'C', 'D'];
+  const rows = ks.map(k => { const e = myStore[k]; if (!e) return [k + ' ' + MY_TYPES[k], '<span class="note">empty</span>', '', '', '', ''];
+    const ok = myStoreOk(e), act = state.net && state.net.runId === e.runId, st = !ok ? '<span class="bad">incompatible (layout or class labels changed)</span>' : (act ? (state.net.ver === e.ver ? 'active' : '<span class="warn">active, modified</span>') : 'available') + (e.saved ? ', in a saved file' : ', not saved to a file');
+    return [(myDefDev === k ? '&#9733; ' : '') + k + ' ' + MY_TYPES[k], st, esc(e.desc) + '<br><span class="note">seed ' + e.seed + ', ' + e.epochs + ' epochs, classes ' + esc(e.classes.join('/')) + '</span>', myPct(e.acc) + (e.nval ? ' (' + e.nval + ' val)' : ''),
+      '<button class="tabbtn" ' + (ok ? '' : 'disabled') + ' onclick="myUseModel(\'' + k + '\')">Make active</button> <button class="tabbtn" ' + (ok ? '' : 'disabled') + ' onclick="myPickDefault(\'' + k + '\')">Set as default</button> <button class="tabbtn" onclick="myDlModel(\'' + k + '\')">Save</button>']; });
+  el.innerHTML = '<h3>Stored models (A to D)</h3><div class="info"><div><b>Active Model</b>: the one you are inspecting or training now.</div><div><b>Stored Models</b>: separate copies of A to D in this tab. Training one never changes another. They are lost on page reload unless saved.</div><div><b>Default Device Model</b>: the one exported to the device. Only you change it (&#9733;).</div><div><b>Saved Model Bundle</b>: a .json file with one or all stored models and the default choice. Device export stays a single myWeights.bin.</div></div>'
+    + myTbl(['Model', 'Status', 'Architecture and training', 'Validation accuracy', 'Actions'], rows.map(r => r.slice(0, 5)))
+    + '<div class="row"><button class="tabbtn" onclick="myDlAll()">Save all stored models (bundle)</button><button class="tabbtn" onclick="$(\'mySetFile\').click()">Load bundle or single model file</button><input type="file" id="mySetFile" accept=".json" hidden onchange="myLoadSetFile(this)"></div><p class="note" id="myStoreMsg"></p><p class="note">The comparison table below uses the run recorded for each architecture. Models loaded from a file appear above but have no recorded run until retrained. To inspect, ablate or continue one, press Make active.</p>';
+  const d = $('myDevInfo'); if (!d) return; const e = myStore[myDefDev];
+  d.innerHTML = !Object.keys(myStore).length ? 'Export uses the active model (no stored models yet).' : !e ? '<span class="warn">No Default Device Model chosen. Pick one in the Compare tab (Stored models) before exporting.</span>'
+    : '<div>Device export will use <b>' + esc(myDefDev + ' ' + e.desc) + '</b>, classes ' + esc(e.classes.join(', ')) + ', validation accuracy ' + myPct(e.acc) + '.</div>' + (myStoreOk(e) ? '<div class="ok">Matches the current layout ' + esc(layoutKey()) + ' and class labels.</div>' : '<div class="bad">Does not match the current layout or class labels: the firmware config would not fit. Export is refused.</div>');
+}
+
 // ---------- Compare ----------
 function myRenderCmp() {
+  myRenderStore();
   const el = $('myCmp'), ks = ['A', 'B', 'C', 'D'].filter(k => myRuns[k]); if (!ks.length) { el.innerHTML = '<p class="note">No runs recorded yet. Train a model, or press Train all four.</p>'; return; }
   const cur = layoutKey(), cls = JSON.stringify(state.classes), sp = new Set(ks.map(k => myRuns[k].split)); let h = '';
   if (sp.size > 1) h += '<p class="warn">These runs used different train/validation splits. Accuracy differences are not a fair comparison.</p>';
@@ -2476,7 +2565,7 @@ function myRenderCmp() {
 }
 // ---------- Configuration, bundle, binding on load ----------
 const myCfgNet = () => { const g = myCur(); return g.net; };
-function myGraphCfgText() { return JSON.stringify(myConfigObj(myCfgNet(), state.classes, { weightsFile: 'header/myWeights.bin', weightsLayout: 'dense, off connections are exact zeros' }), null, 2); }
+function myGraphCfgText(n) { return JSON.stringify(myConfigObj(n || myCfgNet(), state.classes, { weightsFile: 'header/myWeights.bin', weightsLayout: 'dense, off connections are exact zeros' }), null, 2); }
 function myRenderCfg() {
   $('myCfgTxt').value = myGraphCfgText(); const N = Math.max(2, state.classes.length);
   $('myFmtDoc').textContent = 'Layout ' + layoutKey() + ', ' + N + ' classes. float32 little-endian, file order c1w, c1b, c2w, c2b, ow, ob (unchanged from v006):\n  c1w [' + C1F + '][3][3][3]   index f*27 + ky*9 + kx*3 + ch\n  c1b [' + C1F + ']\n  c2w [' + C2F + '][' + C1F + '][3][3]   index f*' + (9 * C1F) + ' + c*9 + ky*3 + kx   (f = conv2 filter, c = conv1 channel)\n  c2b [' + C2F + ']\n  ow  [' + N + '][' + FLAT + ']   index k*' + FLAT + ' + f*' + (C2O * C2O) + ' + y*' + C2O + ' + x\n  ob  [' + N + ']\nActivations: leaky ReLU 0.1, values clipped to +-100, max pool 2x2, logits clipped to +-50, softmax.\nConnectivity: edge (f,c) is active when edgeMask[f][c] = 1 (graph-config.json, or myConnMask.h). Edge index = f*conv1Filters + c.\nOff edges hold exactly 0.0 in myWeights.bin, so the dense v007 loops should compute the same result; a future firmware can skip off edges to save multiply-accumulates (9 per output pixel per skipped edge).\nGate scores, candidate scores and bridge selection are training-only. Inference needs only the mask and weights. Island labels (islandOfConv1/2) are for analysis, not for computing.\nStatus: the dense equivalence was checked by reading firmware-v007 against this page, NOT by running it on a device. No firmware was changed.';
@@ -2555,21 +2644,22 @@ function myBarsHtml(names, vals) {
 }
 
 // Force-directed layout: islands sit on a ring around the x axis, layers run left to right, connected nodes pull together.
+const myRgbSplit = () => { const el = $('myShRgb'); return !!(el && el.checked); };
 function my3dLayoutFor(net, N, on) {
-  const G = net.topo.G, key = [net.topo.type, G, C1F, C2F, N, Array.from(net.edge).join('')].join('|');
+  const G = net.topo.G, key = [net.topo.type, G, C1F, C2F, N, myRgbSplit() ? 'rgb' : 'one', Array.from(net.edge).join('')].join('|');
   if (my3dLayout.key === key) return my3dLayout.pos;
-  const ids = ['in:0'], LX = { in: -13, c1: -4.5, c2: 4.5, cl: 13 }, R = 2.5 + 1.2 * G, pos = {}, home = {}, springs = [];
+  const rgb = myRgbSplit(), ids = rgb ? ['in:0', 'in:1', 'in:2'] : ['in:0'], LX = { in: -13, c1: -4.5, c2: 4.5, cl: 13 }, R = 2.5 + 1.2 * G, pos = {}, home = {}, springs = [];
   for (let c = 0; c < C1F; c++) ids.push('c1:' + c);
   for (let f = 0; f < C2F; f++) ids.push('c2:' + f);
   for (let k = 0; k < N; k++) ids.push('cl:' + k);
   let seed = 7; const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
   for (const id of ids) {
     const [ty, s] = id.split(':'), i = +s, isl = ty === 'c1' ? myIsl1(i, G) : ty === 'c2' ? myIsl2(i, G) : -1;
-    const ang = 2 * Math.PI * (isl >= 0 ? isl / G : i / N), rad = isl >= 0 ? R : (ty === 'cl' ? 3 : 0);
+    const ang = 2 * Math.PI * (isl >= 0 ? isl / G : i / (ty === 'in' ? 3 : N)), rad = isl >= 0 ? R : (ty === 'cl' || (ty === 'in' && rgb) ? 3 : 0);
     home[id] = [LX[ty], rad * Math.cos(ang), rad * Math.sin(ang)];
     pos[id] = [home[id][0] + rand() * 2, home[id][1] + rand() * 3, home[id][2] + rand() * 3];
   }
-  for (let c = 0; c < C1F; c++) springs.push(['in:0', 'c1:' + c, 8.5, 0.02]);
+  for (const inId of ids.filter(x => x.startsWith('in:'))) for (let c = 0; c < C1F; c++) springs.push([inId, 'c1:' + c, 8.5, 0.02]);
   for (const [c, fo] of on) { const f = fo - C1F, cross = myIsl1(c, G) !== myIsl2(f, G); springs.push(['c1:' + c, 'c2:' + f, 9, cross ? 0.012 : 0.03]); }
   for (let f = 0; f < C2F; f++) for (let k = 0; k < N; k++) springs.push(['c2:' + f, 'cl:' + k, 8.5, 0.01]);
   for (let it = 0; it < 300; it++) {
@@ -2706,11 +2796,17 @@ function my3dBuild() {
     (my3dAdj.fwd[a] = my3dAdj.fwd[a] || []).push(b); (my3dAdj.bwd[b] = my3dAdj.bwd[b] || []).push(a);
   };
 
-  addNode('in', 0, -1, 0, 0, 'RGB');
+  const rgbOn = myRgbSplit();
+  if (rgbOn) ['R', 'G', 'B'].forEach((nm, ch) => addNode('in', ch, -1, 0, 0, nm)); else addNode('in', 0, -1, 0, 0, 'RGB');
   for (let c = 0; c < C1F; c++) addNode('c1', c, myIsl1(c, G), outD[c], my3dBc.node[c], 'c1\u00b7' + c);
   for (let f = 0; f < C2F; f++) addNode('c2', f, myIsl2(f, G), inD[f], my3dBc.node[C1F + f], 'c2\u00b7' + f);
   for (let k = 0; k < N; k++) addNode('cl', k, -1, 0, 0, state.classes[k] || 'class ' + k);
-  for (let c = 0; c < C1F; c++) addEdge('in:0', 'c1:' + c, 'ie:' + c, { r: 0.03, col: 0x8b9aac, op: detail ? 0.3 : 0.15, abl: myAbl.c1.has(c), meta: { kind: 'in', c } });
+  const c1m = (c, ch) => { if (!net.w) return 0; let a = 0, n = 0; for (let j = 0; j < 27; j++) if (ch < 0 || j % 3 === ch) { a += Math.abs(net.w.c1w[c * 27 + j]); n++; } return a / n; };
+  let mx1 = 1e-9; if (net.w) for (let c = 0; c < C1F; c++) for (let ch = 0; ch < 3; ch++) mx1 = Math.max(mx1, c1m(c, ch));
+  for (let c = 0; c < C1F; c++) {   // RGB -> conv1: one edge per filter (simplified) or one per colour channel and filter (full); thickness = mean |kernel weight|
+    if (rgbOn) for (let ch = 0; ch < 3; ch++) addEdge('in:' + ch, 'c1:' + c, 'ie:' + c + ':' + ch, { r: 0.02 + (useW ? 0.1 * c1m(c, ch) / mx1 : 0.01), col: [0xff6b6b, 0x6bd66b, 0x6b9bff][ch], op: detail ? 0.5 : 0.35, abl: myAbl.c1.has(c), meta: { kind: 'in', c, ch } });
+    else addEdge('in:0', 'c1:' + c, 'ie:' + c, { r: 0.03 + (useW ? 0.12 * c1m(c, -1) / mx1 : 0), col: 0x8b9aac, op: detail ? 0.45 : 0.3, abl: myAbl.c1.has(c), meta: { kind: 'in', c } });
+  }
   for (let e = 0; e < net.edge.length; e++) {
     const cls = myEdgeClass(net, e); if (cls < 0) continue;
     if (!(cls === 0 ? $('myShW').checked : cls === 1 ? $('myShB').checked : $('myShC').checked)) continue;
@@ -2735,7 +2831,7 @@ function my3dRecolor() {
   for (const n of Object.values(my3dNodes)) {
     let col, v = 0;
     if (n.abl) col = new THREE.Color(0x555a60);
-    else if (n.ty === 'in') col = new THREE.Color(0xdde5ee);
+    else if (n.ty === 'in') col = new THREE.Color(myRgbSplit() ? [0xff6b6b, 0x6bd66b, 0x6b9bff][n.i] : 0xdde5ee);
     else if (n.isl < 0 && by !== 'act') col = new THREE.Color(0x8b9aac);
     else if (by === 'island') col = new THREE.Color(myPal[n.isl % myPal.length]);
     else { v = by === 'between' ? n.bc : (A ? (n.ty === 'c1' ? A.c1[n.i] : n.ty === 'c2' ? A.c2[n.i] : A.probs[n.i]) : 0); col = my3dHeat(v); }
@@ -2771,7 +2867,7 @@ function my3dTipText(id) {
   const n = my3dNodes[id];
   if (n) return n.ty === 'in' ? 'input RGB' : n.ty === 'cl' ? 'class ' + (state.classes[n.i] || n.i) : n.ty + '\u00b7' + n.i + ', island ' + n.isl + ', degree ' + n.deg;
   const ed = my3dEdgeById[id]; if (!ed) return '';
-  return ed.kind === 'cv' ? 'c1\u00b7' + ed.c + ' \u2192 c2\u00b7' + ed.f + ': ' + myEdgeStatus(myCur().net, ed.e) : (ed.kind === 'in' ? 'RGB \u2192 c1\u00b7' + ed.c : 'c2\u00b7' + ed.f + ' \u2192 class ' + (state.classes[ed.k] || ed.k));
+  return ed.kind === 'cv' ? 'c1\u00b7' + ed.c + ' \u2192 c2\u00b7' + ed.f + ': ' + myEdgeStatus(myCur().net, ed.e) : (ed.kind === 'in' ? (ed.ch != null ? 'RGB'[ed.ch] : 'RGB') + ' \u2192 c1\u00b7' + ed.c : 'c2\u00b7' + ed.f + ' \u2192 class ' + (state.classes[ed.k] || ed.k));
 }
 function my3dHoverAt(e) {
   const id = my3dPick(e), tip = $('my3dTip');
@@ -2803,9 +2899,9 @@ function my3dInspect(id) {
   if (id && !my3dNodes[id] && !my3dEdgeById[id]) id = '';
   my3dInsp = id || ''; const box = $('myEdgeInfo');
   if (!id) { box.textContent = 'Click an edge or a node for details.'; return; }
-  if (id === 'in:0') { box.innerHTML = '<b>Input RGB image</b>. Every conv1 channel reads it with its own 3x3x3 kernel.'; return; }
+  if (id.startsWith('in:')) { box.innerHTML = myRgbSplit() ? '<b>Input colour channel ' + 'RGB'[+id.slice(3)] + '</b>. Every conv1 channel has its own 3x3 kernel on this colour (one third of its 3x3x3 kernel), so ' + C1F + ' pathways leave this node. Thickness = mean |weight|.' : '<b>Input RGB image</b>. Every conv1 channel reads it with its own 3x3x3 kernel: ' + C1F + ' pathways, drawn once each. Tick "full RGB view" to see R, G, B separately.'; return; }
   if (id.startsWith('e:')) { const e = +id.slice(2); myEdgeInfo(e); box.innerHTML += '<div>Bridge importance (edge betweenness, 0 to 1): <b>' + my3dBc.edge(e).toFixed(2) + '</b>.</div>' + my3dSwitchHtml(id) + my3dEmphHtml(id); return; }
-  if (id.startsWith('ie:')) { box.innerHTML = '<div><b>RGB to conv1 channel ' + id.slice(3) + '</b>. Click the node to see its kernels.</div>'; return; }
+  if (id.startsWith('ie:')) { box.innerHTML = '<div><b>' + (id.slice(3).includes(':') ? 'RGB'[+id.split(':')[2]] : 'RGB') + ' to conv1 channel ' + id.slice(3).split(':')[0] + '</b>. Click the node to see its kernels.</div>'; return; }
   if (id.startsWith('ke:')) { const [f, k] = id.slice(3).split(',').map(Number); box.innerHTML = '<div><b>conv2 filter ' + f + ' to class ' + esc(state.classes[k] || k) + '</b>: a classifier connection (' + (C2O * C2O) + ' scalar weights). Mean |weight| ' + myNum(my3dW.mo[f * myCur().N + k], 4) + '.</div>'; return; }
   myNodeInfo(id); box.innerHTML += my3dNodeExtra(id);
 }
@@ -2851,7 +2947,8 @@ function my3dSpawn(net) {
     raw.set(ed, v);
   }
   for (const [ed, v] of raw) {
-    const s = ed.kind === 'in' ? A.c1[ed.c] : (ed.kind === 'cv' ? v / mx : v), delay = ed.kind === 'in' ? 0 : (ed.kind === 'cv' ? 0.8 : 1.6);
+    const s = ed.kind === 'in' ? Math.max(0.3, A.c1[ed.c]) :   // input pulses on every RGB edge; brightness shows the channel response, never hidden
+       (ed.kind === 'cv' ? v / mx : v), delay = ed.kind === 'in' ? 0 : (ed.kind === 'cv' ? 0.8 : 1.6);
     if (s < 0.04) continue;
     const col = my3dHeat(s), k = 0.4 + 0.6 * s, count = s > 0.6 ? 3 : s > 0.25 ? 2 : 1;
     for (let j = 0; j < count && my3dPulses.length < 3990; j++) my3dPulses.push({ curve: ed.curve, t0: now + delay + j * 0.18, dur: 0.8, r: col.r * k, g: col.g * k, b: col.b * k });
@@ -2917,7 +3014,7 @@ $('btnTrain2').onclick = () => $('btnTrain').click(); $('btnStop2').onclick = ()
 $('btnPred').onclick = myPredict; $('btnActs').onclick = myComputeActs; $('btnEx').onclick = myShowExample;
 $('btnAblRun').onclick = myAblRun; $('btnAblSweep').onclick = myAblSweep; $('btnAblClear').onclick = () => { myAbl.c1.clear(); myAbl.c2.clear(); myAbl.e.clear(); myRenderAblUi(); };
 $('btnStats').onclick = () => myRenderStats(true); $('btnAll4').onclick = myTrainAll; $('btnRep').onclick = myRepeat;
-['myShW', 'myShB', 'myShC', 'myShK', 'myShWt', 'myShLab', 'myHi'].forEach(id => $(id).addEventListener('change', myRenderGraph));
+['myShW', 'myShB', 'myShC', 'myShK', 'myShWt', 'myShLab', 'myShRgb', 'myHi'].forEach(id => $(id).addEventListener('change', myRenderGraph));
 $('myGraphSvg').onclick = e => { const t = e.target.closest('[data-e],[data-n],[data-k]'); if (!t) return; if (t.dataset.e !== undefined) myEdgeInfo(+t.dataset.e); else if (t.dataset.n) myNodeInfo(t.dataset.n); else { const [f, k] = t.dataset.k.split(',').map(Number); $('myEdgeInfo').innerHTML = '<div>conv2 filter ' + f + ' to class ' + esc(state.classes[k]) + ': a classifier connection (' + (C2O * C2O) + ' scalar weights).</div>'; } };
 $('myAblUi').addEventListener('change', e => { const a = e.target.dataset.a; if (!a) return; const [ty, i] = a.split(':'), S = myAbl[ty === 'e' ? 'e' : ty]; e.target.checked ? S.add(+i) : S.delete(+i); });
 $('myAblUi').addEventListener('click', e => { const b = e.target.closest('[data-isl]'); if (!b) return; const net = myLive(); if (!net) return; const sp = myIslandSpec(+b.dataset.isl, net.topo.G), on = sp.c1.every(c => myAbl.c1.has(c)) && sp.c2.every(f => myAbl.c2.has(f)); sp.c1.forEach(c => on ? myAbl.c1.delete(c) : myAbl.c1.add(c)); sp.c2.forEach(f => on ? myAbl.c2.delete(f) : myAbl.c2.add(f)); myRenderAblUi(); });
