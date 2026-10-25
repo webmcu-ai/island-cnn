@@ -18,13 +18,17 @@
   v004: 3D graph can split RGB into R, G, B nodes (full connectivity); Camera button is green; burst delay defaults to 300 ms (no wait after the last frame);
         Train all four honours "Continue from the weights in memory"; Stored Models A-D (independent snapshots), a deliberately chosen Default Device Model for export,
         model-set bundle save/load. Forward pass, backward pass and the myWeights.bin format are unchanged.
+  v006: a held-out TEST split (never used by training, bridge selection, coach or ablation; scored once per stored model), Model E (dense A pruned by weight size
+        to the same edge count as a reference model, then fine-tuned: the baseline the island idea must beat), a K sweep (accuracy against bridge budget),
+        a bigger scoreboard (test accuracy, predicted speedup, compact weight bytes, resident maps, measured device ms), a "What this page is for" panel, and
+        Save writes A-myWeights.bin ... E-myWeights.bin next to myWeights.bin, with config.json naming the active model. Forward and backward pass unchanged.
   Three.js r128 is loaded from cdnjs for the 3D view only. Without it (offline) the page works and shows the 2D schematic. MIT license. Use at your own risk.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vision CNN SD trainer v004 (model store)</title>
+<title>Vision CNN SD trainer v006 (test split, model E, K sweep)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 :root{--bg:#11151b;--panel:#182029;--panel2:#1f2a36;--line:#2c3947;--text:#dde5ee;--mut:#8b9aac;--acc:#66d1bd;--acc-ink:#062a24;--bad:#ef6b73;--warn:#e9b44c;--ok:#7bd88f;--r:8px}
@@ -122,11 +126,24 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 </head>
 <body>
 <header>
-  <h1>Vision CNN SD trainer<span class="ver">v004 model store + RGB pathways</span></h1>
+  <h1>Vision CNN SD trainer<span class="ver">v006 test split, model E, K sweep</span></h1>
   <p>Browser companion for the XIAO ESP32-S3 FULL VISION ML firmware (firmware-v007; firmware-v005 and later also give config.json class names and debug frames): load the SD card, add images, review and clean them, train the same CNN, then write myWeights.bin back to the card.</p>
   <p>Everything runs in this page. Images and weights never leave your computer.</p>
 </header>
 <main>
+
+<section id="s-about">
+  <h2>What this page is for</h2>
+  <details open><summary>Read this first: the question, the claims, the limits</summary>
+    <p><b>The question.</b> How many conv1 to conv2 connections does a vision task really need, which ones, and can a person and a machine agree on the answer well enough to act on it?</p>
+    <p><b>What this page does not claim.</b> It does not claim that islands train a better model than the normal CNN. Model A can represent everything the others can (set some weights to zero and you have them), so at equal width A cannot lose on capacity. Any difference comes from optimisation, generalisation and cost, and those are what the page measures.</p>
+    <p><b>The five models.</b> A: every connection. B: islands only. C: islands plus K fixed bridges. D: islands plus K bridges chosen by learned gates. E: A trained first, then its weakest connections pruned by kernel size down to the same count as D, then fine-tuned. E is the honest baseline: if D does not beat E at the same number of connections, the island idea adds nothing over ordinary pruning.</p>
+    <p><b>Is fewer connections faster on the microcontroller?</b> Only if the firmware skips them. Zeros in a dense loop cost the same as live weights. With a skip list, conv2 time should fall roughly with the active connection count, but conv1 and the classifier do not shrink, so the whole model speeds up by less. The page predicts the speedup from multiply-accumulates; type your measured milliseconds into the Compare table to check the prediction. Peak memory depends on the order the firmware computes things in; the table gives one estimate, for an island-by-island schedule.</p>
+    <p><b>How to read the evidence.</b> Validation images are for looking and choosing. Test images are held apart: no training, no bridge selection, no coach, no ablation touches them. Each stored model is scored on them once, and the page counts how many looks the test set has had. One seed is an anecdote, so use Repeat and the K sweep. Ablation shows what a model uses, not what a filter means.</p>
+    <p><b>Limits.</b> Only the conv1 to conv2 channel connections are constrained, on a small network. Nothing here shows the same result for a larger CNN. The coach's evidence (zero-ablation, gate scores) is close to ordinary pruning criteria, so compare it with E before claiming it adds anything.</p>
+    <p><b>Words.</b> Island: a group of conv1 channels and conv2 filters allowed to connect to each other. Bridge: a connection that crosses islands (one 3x3 kernel, 9 weights). K: the bridge budget. Edge: any conv1 channel to conv2 filter connection.</p>
+  </details>
+</section>
 
 <!-- ============ 1 DATA SOURCE ============ -->
 <section id="s-source">
@@ -222,7 +239,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
   <p class="note">These are compile-time settings in the sketch (INPUT_SIZE, CONV1_FILTERS, CONV2_FILTERS). Copy the lines from section 2 into the sketch after changing them. The 3x3 kernel is fixed in the firmware loops. Images on the card stay 240x240, so changing the size needs no new photos, only a retrain. The size must be even because of the 2x2 max pool. Cost grows with the square of the input size, in the browser and on the device.</p>
   <h3>Connectivity (graph-theory model type)</h3>
   <div class="grid">
-    <label>Model type<select id="myType"><option value="A">A  Normal CNN (all connections)</option><option value="B">B  Isolated islands</option><option value="C">C  Designed archipelago (fixed bridges)</option><option value="D">D  Learned archipelago (learned bridges)</option></select></label>
+    <label>Model type<select id="myType"><option value="E" disabled>E  Pruned dense (made on the Compare tab)</option><option value="A">A  Normal CNN (all connections)</option><option value="B">B  Isolated islands</option><option value="C">C  Designed archipelago (fixed bridges)</option><option value="D">D  Learned archipelago (learned bridges)</option></select></label>
     <label>Islands (groups)<input type="number" id="myG" value="2" min="2" max="16" step="1"></label>
     <label>Bridge budget K (C and D)<input type="number" id="myK" value="4" min="0" step="1"></label>
     <label>Random seed (blank = new each run)<input type="number" id="mySeed" placeholder="auto" min="1" step="1"></label>
@@ -244,6 +261,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
       </select>
     </label>
     <label><span id="valAmtLabel">Images per class held out</span><input type="number" id="valAmt" value="3" step="1" min="0"></label>
+    <label><span id="testAmtLabel">Test images per class (kept apart, scored once)</span><input type="number" id="testAmt" value="3" step="1" min="0"></label>
     <label>Dropout (browser only)<input type="number" id="dropout" value="0" step="0.05" min="0" max="0.8"></label>
   </div>
   <div class="row">
@@ -317,7 +335,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
   </div>
   <div class="tabpane" id="gp2"><div id="myIB"></div></div>
   <div class="tabpane" id="gp3">
-    <div class="row"><select id="myActSet" aria-label="Dataset split"><option value="val">Validation images</option><option value="train">Training images</option><option value="all">All images</option></select><button id="btnActs" class="primary">Compute activations</button></div>
+    <div class="row"><select id="myActSet" aria-label="Dataset split"><option value="val">Validation images</option><option value="train">Training images</option><option value="all">Train + validation (test excluded)</option></select><button id="btnActs" class="primary">Compute activations</button></div>
     <div id="myActOut" class="note">Not computed yet.</div>
     <h3>Inspect one example</h3>
     <div class="row"><select id="myExCls" aria-label="Class"></select><input type="number" id="myExIdx" value="1" min="1" style="width:90px" aria-label="Image number"><button id="btnEx">Show activations</button></div>
@@ -326,7 +344,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
   <div class="tabpane" id="gp4">
     <p class="note">Tick elements to switch off temporarily (zero-ablation: the channel's output or the bridge's contribution is set to 0 during evaluation only). Saved weights and topology are never changed.</p>
     <div id="myAblUi"></div>
-    <div class="row"><select id="myAblSet" aria-label="Dataset split"><option value="val">Validation images</option><option value="all">All images</option></select><button id="btnAblRun" class="primary">Run ablation</button><button id="btnAblSweep">Sweep every channel, island and bridge</button><button id="btnAblClear">Clear marks</button></div>
+    <div class="row"><select id="myAblSet" aria-label="Dataset split"><option value="val">Validation images</option><option value="all">Train + validation (test excluded)</option></select><button id="btnAblRun" class="primary">Run ablation</button><button id="btnAblSweep">Sweep every channel, island and bridge</button><button id="btnAblClear">Clear marks</button></div>
     <div id="myAblOut"></div>
   </div>
   <div class="tabpane" id="gp5"><div class="row"><button id="btnStats" class="primary">Recompute (and time inference)</button></div><div id="myStats"></div></div>
@@ -334,6 +352,17 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
     <div class="row"><button id="btnAll4" class="primary">Train all four (same split, settings, seed)</button>
       <label class="chk" style="gap:6px">Repeat <input type="number" id="myRepN" value="3" min="2" max="10" style="width:70px" aria-label="Number of seeds"> seeds of <select id="myRepType" style="width:auto" aria-label="Model type"><option>A</option><option>B</option><option>C</option><option selected>D</option></select></label><button id="btnRep">Repeat</button></div>
     <p class="note">Runs use the training settings and validation rule of section 3. Same seed means same starting weights and same shuffling, so differences come from connectivity. One seed is an anecdote: use the repeat button before drawing conclusions.</p>
+    <div class="row"><label class="chk" style="gap:6px">Model E: prune stored A to the edge count of <select id="myERef" style="width:auto" aria-label="Reference model"><option>D</option><option>C</option><option>B</option></select></label><button onclick="myMakeE()">Make E (prune A by weight size, then fine-tune)</button></div>
+    <p class="note">E is the baseline the island idea has to beat. It takes the trained normal CNN, removes the weakest conv1 to conv2 connections (by kernel size) until the count equals the reference model's, then fine-tunes for the "Fine-tune epochs" of section 3, the same as D. If D does not beat E at equal edge count, islands add nothing over ordinary pruning.</p>
+    <details><summary>K sweep: accuracy against the number of bridges (C, D and E, with A as the reference line)</summary>
+      <div class="grid">
+        <label>K values (blank = 0, 25, 50, 75 and 100% of the candidates)<input type="text" id="myKList" placeholder="0, 2, 4, 8, 12"></label>
+        <label>Seeds per point (1 to 5)<input type="number" id="mySweepSeeds" value="1" min="1" max="5"></label>
+      </div>
+      <div class="row"><label class="chk"><input type="checkbox" id="mySweepE" checked> Also make E for every D</label><button class="primary" onclick="myRunSweep()">Run sweep</button><button onclick="myDlSweep()">Save sweep.json</button></div>
+      <p class="note">Uses the settings of section 3 and the islands box of section 3. Trains A once per seed, then C and D at every K, and E from A at D's edge count. Pick K from these validation numbers, then score the one model you chose on the test set. The stored slots keep the last K trained; the results stay in the chart below and in sweep.json. K = 0 is the isolated-islands model B.</p>
+      <div id="myKSweepOut"></div>
+    </details>
     <div id="myStoreBox"></div>
     <div id="myCmp"></div>
   </div>
@@ -380,7 +409,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
   <div class="row">
     <select id="evalSet" aria-label="Evaluate on">
       <option value="val">Evaluate on validation images</option>
-      <option value="all">Evaluate on all images (find bad labels)</option>
+      <option value="all">Evaluate on all images, test included (find bad labels; a look at the test set)</option>
     </select>
     <button id="btnEval" class="primary">Update evaluation</button>
     <button id="btnParity">Parity self-test</button>
@@ -513,7 +542,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 
 <script>
 'use strict';
-const VERSION = 'v004';
+const VERSION = 'v006';
 
 /* ==CORE START== (no DOM use below this line until CORE END) */
 
@@ -743,22 +772,23 @@ function augment(x) {
 
 // Train/validation split. items: [{cls, path, ref}]. 'fw' mirrors the firmware: sort by path, hold out the
 // LAST N per class. 'pct': last k per class where k = pct of the smallest class (always leaves 1 to train).
-function splitData(items, N, mode, param) {
+function splitData(items, N, mode, param, tparam) {
   const sorted = items.slice().sort((a, b) => a.path < b.path ? -1 : (a.path > b.path ? 1 : 0));
   const counts = new Array(N).fill(0); for (const it of sorted) counts[it.cls]++;
+  const present = counts.filter(c => c > 0), mn = present.length ? Math.min(...present) : 0;
   let skip;
   if (mode === 'fw') skip = counts.map(c => Math.min(param, c));
-  else {
-    const present = counts.filter(c => c > 0), mn = present.length ? Math.min(...present) : 0;
-    const k = Math.round(param / 100 * mn);
-    skip = counts.map(c => Math.max(0, Math.min(k, c - 1)));
-  }
-  const train = [], val = [], seen = new Array(N).fill(0);
+  else { const k = Math.round(param / 100 * mn); skip = counts.map(c => Math.max(0, Math.min(k, c - 1))); }
+  const tp = tparam > 0 ? tparam : 0, kt = mode === 'fw' ? Math.floor(tp) : Math.round(tp / 100 * mn);
+  const skipT = counts.map((c, i) => Math.max(0, Math.min(kt, c - skip[i] - 1)));
+  const train = [], val = [], test = [], seen = new Array(N).fill(0), seenT = new Array(N).fill(0);
   for (let i = sorted.length - 1; i >= 0; i--) {
     const c = sorted[i].cls;
-    if (seen[c] < skip[c]) { val.push(sorted[i].ref); seen[c]++; } else train.push(sorted[i].ref);
+    if (seen[c] < skip[c]) { val.push(sorted[i].ref); seen[c]++; }
+    else if (seenT[c] < skipT[c]) { test.push(sorted[i].ref); seenT[c]++; }
+    else train.push(sorted[i].ref);
   }
-  return { train, val };
+  return { train, val, test };
 }
 
 function copyObj(o) { const r = {}; for (const k of PARAM_ORDER) r[k] = o[k].slice(); return r; }
@@ -878,8 +908,8 @@ function mySetSeed(s) {   // mulberry32. A seed of 0 or less means "not seeded" 
   let a = s >>> 0;
   rnd = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
-const MY_TYPES = { A: 'Normal CNN', B: 'Isolated islands', C: 'Designed archipelago', D: 'Learned archipelago' };
-const MY_TYPE_JSON = { A: 'normal', B: 'isolatedIslands', C: 'designedArchipelago', D: 'learnedArchipelago' };
+const MY_TYPES = { A: 'Normal CNN', B: 'Isolated islands', C: 'Designed archipelago', D: 'Learned archipelago', E: 'Pruned dense (weight size)' };
+const MY_TYPE_JSON = { A: 'normal', B: 'isolatedIslands', C: 'designedArchipelago', D: 'learnedArchipelago', E: 'prunedDense' };
 const myIsl1 = (c, G) => Math.min(G - 1, Math.floor(c * G / C1F));   // island of conv1 channel c
 const myIsl2 = (f, G) => Math.min(G - 1, Math.floor(f * G / C2F));   // island of conv2 filter f
 function myCandidates(G) { const o = []; for (let f = 0; f < C2F; f++) for (let c = 0; c < C1F; c++) if (myIsl2(f, G) !== myIsl1(c, G)) o.push([f, c]); return o; }
@@ -891,6 +921,7 @@ function myTopoCheck(t) {
   const mx = Math.min(C1F, C2F);
   if (!Number.isInteger(t.G) || t.G < 2 || t.G > mx) return 'Islands must be a whole number from 2 to ' + mx + ' (the smaller of the two filter counts).';
   if (t.type === 'C' || t.type === 'D') { const M = myCandidates(t.G).length; if (!Number.isInteger(t.K) || t.K < 0 || t.K > M) return 'Bridge budget K must be a whole number from 0 to ' + M + ' (the number of cross-island channel connections).'; }
+  if (t.type === 'E' && (!Number.isInteger(t.K) || t.K < 1 || t.K > C1F * C2F)) return 'Kept edge count must be a whole number from 1 to ' + C1F * C2F + '.';
   if (t.type === 'D') {
     if (!(t.lam >= 0)) return 'Sparsity penalty must be 0 or more.';
     if (!(t.gateLr > 0)) return 'Gate learning rate must be above 0.';
@@ -902,10 +933,10 @@ function myEdges(t) {
   const E = new Uint8Array(C1F * C2F);
   for (let f = 0; f < C2F; f++) for (let c = 0; c < C1F; c++) {
     const within = myIsl2(f, t.G) === myIsl1(c, t.G);
-    E[f * C1F + c] = t.type === 'A' ? 1 : (within ? 1 : (t.type === 'D' && t.stage === 'gating' ? 3 : 0));
+    E[f * C1F + c] = t.type === 'A' ? 1 : (t.type === 'E' ? 0 : (within ? 1 : (t.type === 'D' && t.stage === 'gating' ? 3 : 0)));
   }
   if (t.type === 'C') for (const [f, c] of myDesigned(t.G, t.K)) E[f * C1F + c] = 2;
-  if (t.type === 'D' && t.stage === 'final') for (const [f, c] of t.sel) E[f * C1F + c] = 2;
+  if ((t.type === 'D' || t.type === 'E') && t.stage === 'final') for (const [f, c] of t.sel) E[f * C1F + c] = 2;
   return E;
 }
 function myEnforceMask(net) {   // weights of off edges are exactly 0, and so is their optimizer state
@@ -955,9 +986,10 @@ function mySelectTopK(net) {
   myEnforceMask(net); myRefreshGates(net);
 }
 function myTopoSame(a, b) { return a && b && a.type === b.type && a.G === b.G && (a.type === 'A' || a.type === 'B' || a.K === b.K) && a.stage === 'final'; }
-const myDesc = t => t.type + ' ' + MY_TYPES[t.type] + (t.type === 'A' ? '' : ', ' + t.G + ' islands') + (t.type === 'C' || t.type === 'D' ? ', budget ' + t.K : '');
+const myDesc = t => t.type + ' ' + MY_TYPES[t.type] + (t.type === 'A' || t.type === 'E' ? '' : ', ' + t.G + ' islands') + (t.type === 'C' || t.type === 'D' ? ', budget ' + t.K : '') + (t.type === 'E' ? ', ' + t.K + ' of ' + C1F * C2F + ' edges kept' : '');
 function myEdgeStatus(net, e) {
   const f = Math.floor(e / C1F), c = e % C1F, G = net.topo.G, cross = myIsl1(c, G) !== myIsl2(f, G), k = net.edge[e], t = net.topo.type;
+  if (t === 'E') return k === 0 ? 'pruned' : 'kept after pruning';
   if (k === 3) return 'candidate (gated)';
   if (k === 2) return t === 'C' ? 'fixed bridge' : 'selected bridge';
   if (k === 1) return t === 'A' ? (cross ? 'dense (crosses islands)' : 'dense (within island)') : 'within island';
@@ -967,8 +999,9 @@ function myCounts(net) {
   const N = net.N, G = net.topo.G; let on = 0, cross = 0, within = 0, nz = 0;
   for (let e = 0; e < net.edge.length; e++) if (net.edge[e] > 0) { on++; const f = Math.floor(e / C1F), c = e % C1F; if (myIsl1(c, G) !== myIsl2(f, G)) cross++; else within++; }
   const w = net.w; for (const k of PARAM_ORDER) for (let i = 0; i < w[k].length; i++) if (w[k][i] !== 0) nz++;
+  let res = 0; for (let i = 0; i < G; i++) { let n = 0; for (let c = 0; c < C1F; c++) { let used = false; for (let f = 0; f < C2F; f++) if (myIsl2(f, G) === i && net.edge[f * C1F + c] > 0) used = true; if (used) n++; } res = Math.max(res, n); }
   const m1 = C1O * C1O * 27 * C1F, m2 = C2O * C2O * 9 * on, m3 = FLAT * N;
-  return { on, possible: C1F * C2F, cross, within, stored: totalFloats(N), active: C1W + C1F + 9 * on + C2F + FLAT * N + N, nonzero: nz, macs: m1 + m2 + m3, macsDense: m1 + C2O * C2O * 9 * C1F * C2F + m3 };
+  return { on, possible: C1F * C2F, cross, within, stored: totalFloats(N), active: C1W + C1F + 9 * on + C2F + FLAT * N + N, nonzero: nz, macs: m1 + m2 + m3, resident: res * P1O * P1O, residentDense: C1F * P1O * P1O, macsDense: m1 + C2O * C2O * 9 * C1F * C2F + m3 };
 }
 // ---- structural graph measures (channel-level, directed, layered: input -> conv1 -> conv2 -> classes) ----
 function myGraphStats(net) {
@@ -1073,12 +1106,12 @@ function myConfigObj(net, classes, extra) {
   return Object.assign({
     configVersion: 1, page: 'vision-cnn-sd-trainer ' + VERSION, modelType: MY_TYPE_JSON[t.type],
     architecture: { inputWidth: IN, inputHeight: IN, inputChannels: 3, conv1Filters: C1F, conv2Filters: C2F, kernel: 3, pool: 'max2x2', activation: 'leakyReLU0.1', classCount: classes.length, classes: classes.slice() },
-    connectivity: { mode: { A: 'dense', B: 'isolatedIslands', C: 'designedBridges', D: 'learnedBridges' }[t.type], layer: 'conv1->conv2 channel connections, edge index = dstFilter*conv1Filters+srcChannel',
+    connectivity: { mode: { A: 'dense', B: 'isolatedIslands', C: 'designedBridges', D: 'learnedBridges', E: 'prunedDense' }[t.type], layer: 'conv1->conv2 channel connections, edge index = dstFilter*conv1Filters+srcChannel',
       groupCount: G, islandOfConv1: Array.from({ length: C1F }, (_, c) => myIsl1(c, G)), islandOfConv2: Array.from({ length: C2F }, (_, f) => myIsl2(f, G)),
       bridgeBudget: t.type === 'C' || isD ? t.K : 0, candidateBridgeCount: t.type === 'C' || isD ? myCandidates(G).length : 0,
-      selectionMethod: t.type === 'C' ? 'designedEvenlySpaced' : (isD ? 'trainGatesThenSelectTopK' : 'none'),
-      stage: isD ? (t.stage === 'final' ? 'selected' : 'untrained') : 'fixed', selectedBridges: sel.map(([f, c]) => ({ dst: f, src: c })), edgeMask: myMaskRows(net) },
-    training: { seed: t.seed || null, sparsityPenalty: isD ? t.lam : null, gateLearningRate: isD ? t.gateLr : null, fineTuneEpochs: isD ? t.ft : null },
+      selectionMethod: t.type === 'C' ? 'designedEvenlySpaced' : (isD ? 'trainGatesThenSelectTopK' : (t.type === 'E' ? 'magnitudePruneFromDenseThenFineTune' : 'none')),
+      stage: isD ? (t.stage === 'final' ? 'selected' : 'untrained') : (t.type === 'E' ? 'selected' : 'fixed'), selectedBridges: sel.map(([f, c]) => ({ dst: f, src: c })), edgeMask: myMaskRows(net), keptEdgeCount: t.type === 'E' ? t.K : null, keptEdges: t.type === 'E' ? t.sel.map(([f, c]) => ({ dst: f, src: c })) : [] },
+    training: { seed: t.seed || null, sparsityPenalty: isD ? t.lam : null, gateLearningRate: isD ? t.gateLr : null, fineTuneEpochs: isD || t.type === 'E' ? t.ft : null },
     tuning: { moves: (net.fx ? net.fx.plan : []).map(m => Object.assign({}, m)) }
   }, extra || {});
 }
@@ -1092,7 +1125,7 @@ function myParseConfig(cfg, classes) {
   chk('inputWidth', IN, 'Input width'); chk('inputHeight', IN, 'Input height'); chk('conv1Filters', C1F, 'Conv1 filters'); chk('conv2Filters', C2F, 'Conv2 filters'); chk('classCount', classes.length, 'Class count');
   const type = Object.keys(MY_TYPE_JSON).find(k => MY_TYPE_JSON[k] === cfg.modelType);
   if (!type) { er.push('Unknown modelType "' + cfg.modelType + '".'); return { errors: er }; }
-  const t = Object.assign(myDefaultTopo(), { type, G: cn.groupCount, K: type === 'A' || type === 'B' ? 0 : cn.bridgeBudget });
+  const t = Object.assign(myDefaultTopo(), { type, G: cn.groupCount, K: type === 'A' || type === 'B' ? 0 : (type === 'E' ? cn.keptEdgeCount : cn.bridgeBudget) });
   const tr = cfg.training || {}; if (type === 'D') { if (tr.sparsityPenalty != null) t.lam = tr.sparsityPenalty; if (tr.gateLearningRate != null) t.gateLr = tr.gateLearningRate; if (tr.fineTuneEpochs != null) t.ft = tr.fineTuneEpochs; }
   t.seed = tr.seed || 0;
   const te = myTopoCheck(t); if (te) { er.push(te); return { errors: er }; }
@@ -1103,6 +1136,12 @@ function myParseConfig(cfg, classes) {
   }
   if (type === 'C') { const d = myDesigned(t.G, t.K).map(([f, c]) => f * C1F + c).join(); if (sb.length && sel.map(([f, c]) => f * C1F + c).sort((x, y) => x - y).join() !== d.split(',').map(Number).sort((x, y) => x - y).join()) er.push('selectedBridges differ from the deterministic designed topology for ' + t.G + ' islands and budget ' + t.K + '.'); }
   if (type === 'D') { if (cn.stage === 'selected') { if (sel.length !== t.K) er.push('Learned topology lists ' + sel.length + ' bridges but the budget is ' + t.K + '.'); t.stage = 'final'; t.sel = sel; } }
+  if (type === 'E') {
+    const ke = Array.isArray(cn.keptEdges) ? cn.keptEdges : [], seenE = new Set(), kept = [];
+    for (const b of ke) { if (!b || !Number.isInteger(b.dst) || !Number.isInteger(b.src) || b.dst < 0 || b.dst >= C2F || b.src < 0 || b.src >= C1F) er.push('A kept edge is out of range: ' + JSON.stringify(b)); else if (seenE.has(b.dst * C1F + b.src)) er.push('Kept edge ' + b.src + '->' + b.dst + ' is listed twice.'); else { seenE.add(b.dst * C1F + b.src); kept.push([b.dst, b.src]); } }
+    if (kept.length !== t.K) er.push('Pruned model lists ' + kept.length + ' kept edges but the count is ' + t.K + '.');
+    t.stage = 'final'; t.sel = kept;
+  }
   if (!er.length && cn.edgeMask) { const tmp = { edge: myEdges(t) }; if (JSON.stringify(myMaskRows(tmp)) !== JSON.stringify(cn.edgeMask)) er.push('edgeMask does not match the connectivity described by the other fields.'); }
   return { errors: er, topo: t };
 }
@@ -1112,7 +1151,7 @@ function myBuildBundle(net, classes, meta) {
   const t = net.topo;
   return { bundleVersion: 1, config: myConfigObj(net, classes),
     weights: { order: PARAM_ORDER, dtype: 'float32-le', floats: totalFloats(net.N), base64: myB64(new Uint8Array(serializeWeights(net))) },
-    learnedBridges: t.type === 'D' ? { gateScoresAllEdges: Array.from(net.gs), candidateScores: t.candScores, history: t.hist } : null,
+    learnedBridges: t.type === 'D' ? { gateScoresAllEdges: Array.from(net.gs), candidateScores: t.candScores, history: t.hist } : (t.type === 'E' ? { history: t.hist } : null),
     classLabels: classes.slice(), metrics: meta || null };
 }
 function myImportBundle(b, classes) {   // throws Error with a readable message; never touches page state
@@ -1297,9 +1336,10 @@ function ensureNet() { const N = state.classes.length; if (!state.net || state.n
 function hasModel() { return state.net && state.net.N === state.classes.length && state.net.key === layoutKey() && state.wStatus !== 'none' && state.wStatus !== 'refused'; }
 
 function splitParams() { const mode = $('valMode').value, v = parseFloat($('valAmt').value); return { mode, p: Math.max(0, Number.isFinite(v) ? v : 0) }; }
+function testParam() { const v = parseFloat($('testAmt').value); return Math.max(0, Number.isFinite(v) ? v : 0); }
 function currentSplit() {
-  const { mode, p } = splitParams();
-  return splitData(state.samples.map(s => ({ cls: s.cls, path: pathOf(s), ref: s })), state.classes.length, mode, mode === 'fw' ? Math.floor(p) : p);
+  const { mode, p } = splitParams(), tp = testParam();
+  return splitData(state.samples.map(s => ({ cls: s.cls, path: pathOf(s), ref: s })), state.classes.length, mode, mode === 'fw' ? Math.floor(p) : p, mode === 'fw' ? Math.floor(tp) : tp);
 }
 
 // ---------- weights ----------
@@ -1492,9 +1532,10 @@ function renderLayoutInfo() {
 
 function updateSplitInfo() {
   if (!state.samples.length) { $('splitInfo').textContent = ''; return; }
-  const sp = currentSplit(), vc = new Array(state.classes.length).fill(0); sp.val.forEach(s => vc[s.cls]++);
+  const sp = currentSplit(), vc = new Array(state.classes.length).fill(0), tc = vc.slice(); sp.val.forEach(s => vc[s.cls]++); sp.test.forEach(s => tc[s.cls]++);
   $('splitInfo').textContent = 'Train ' + sp.train.length + ' images. Validation ' + sp.val.length + ' images (' + state.classes.map((k, i) => k + ' ' + vc[i]).join(', ') + ').' +
-    (splitParams().mode === 'fw' ? ' Same images the device holds out when its VALIDATION_IMAGES is ' + Math.floor(splitParams().p) + '.' : '');
+    (splitParams().mode === 'fw' ? ' Same images the device holds out when its VALIDATION_IMAGES is ' + Math.floor(splitParams().p) + '.' : '') +
+    (sp.test.length ? ' Test ' + sp.test.length + ' images (' + state.classes.map((k, i) => k + ' ' + tc[i]).join(', ') + '): used by nothing until you score a stored model on the Compare tab.' : ' No test images are held out: validation accuracy is the only number, and it has been used to choose things.');
 }
 
 // ---------- class management ----------
@@ -1773,7 +1814,8 @@ async function liveLoop() {
 }
 
 // ---------- save ----------
-const configJson = () => JSON.stringify({ page: 'vision-cnn-sd-trainer ' + VERSION, firmware: 'FULL VISION ML firmware-v007', input_size: IN, input_channels: 3, conv1_filters: C1F, conv2_filters: C2F, kernel_size: 3, classes: state.classes, weights_file: 'header/myWeights.bin', weights_floats: totalFloats(state.classes.length), note: 'Class names are read by this page and by the firmware at boot. NUM_CLASSES, INPUT_SIZE and filter counts are compile-time in the sketch.' }, null, 2);
+const configBase = () => ({ page: 'vision-cnn-sd-trainer ' + VERSION, firmware: 'FULL VISION ML firmware-v007', input_size: IN, input_channels: 3, conv1_filters: C1F, conv2_filters: C2F, kernel_size: 3, classes: state.classes, weights_file: 'header/myWeights.bin', weights_floats: totalFloats(state.classes.length), note: 'Class names are read by this page and by the firmware at boot. NUM_CLASSES, INPUT_SIZE and filter counts are compile-time in the sketch.' });
+const configJson = () => JSON.stringify(Object.assign(configBase(), myBundleCfg()), null, 2);
 
 async function saveWeights() {
   const st = $('saveStatus');
@@ -1791,8 +1833,9 @@ async function saveWeights() {
       await writeFile(hd, 'myWeights.bin', new Blob([bytes]));
       await writeFile(hd, 'config.json', new Blob([configJson()]));
       await writeFile(hd, 'graph-config.json', new Blob([myGraphCfgText(dn)]));
+      const mf = myModelFiles(); for (const m of mf) { await writeFile(hd, m.k + '-myWeights.bin', new Blob([m.bytes])); await writeFile(hd, m.k + '-graph-config.json', new Blob([m.graph])); }
       state.dirty = false; state.wStatus = 'loaded'; state.wNote = 'Saved header/myWeights.bin (' + bytes.byteLength + ' bytes).';
-      st.textContent = 'Saved header/myWeights.bin (' + bytes.byteLength + ' bytes) and header/config.json' + (old ? ', previous file kept as myWeights.bin.bak.' : '.');
+      st.textContent = 'Saved header/myWeights.bin (' + bytes.byteLength + ' bytes) and header/config.json' + (old ? ', previous file kept as myWeights.bin.bak' : '') + '. ' + (mf.length ? 'Also wrote ' + mf.map(m => m.k + '-myWeights.bin').join(', ') : 'No stored models, so no per-model files') + '. Active model named in config.json: ' + (myBundleCfg().active_model || 'none') + '.';
     } catch (e) { st.textContent = 'Save failed: ' + e.message; }
   } else {
     state.dirty = false; st.textContent = 'Model kept for the zip. Press Save .zip to download it in the SD card layout.';
@@ -1808,6 +1851,7 @@ async function buildZip() {
   else log('No model in memory, so the zip has no myWeights.bin.');
   files.push({ name: 'header/config.json', data: enc.encode(configJson()) });
   files.push({ name: 'header/graph-config.json', data: enc.encode(myGraphCfgText(dn || undefined)) });
+  for (const m of myModelFiles()) { files.push({ name: 'header/' + m.k + '-myWeights.bin', data: m.bytes }); files.push({ name: 'header/' + m.k + '-graph-config.json', data: enc.encode(m.graph) }); }
   return makeZip(files);
 }
 async function saveZip() {
@@ -2080,9 +2124,11 @@ document.querySelectorAll('.heatOverlay').forEach(e => e.onchange = () => { heat
 $('valMode').onchange = () => {
   const fw = $('valMode').value === 'fw';
   $('valAmtLabel').textContent = fw ? 'Images per class held out' : '% of smallest class held out';
-  $('valAmt').value = fw ? 3 : 20; renderClasses(); updateSplitInfo();
+  $('testAmtLabel').textContent = fw ? 'Test images per class (kept apart, scored once)' : '% of smallest class kept as test (scored once)';
+  $('valAmt').value = fw ? 3 : 20; $('testAmt').value = fw ? 3 : 20; renderClasses(); updateSplitInfo();
 };
 $('valAmt').oninput = () => { renderClasses(); updateSplitInfo(); };
+$('testAmt').oninput = () => { renderClasses(); updateSplitInfo(); };
 $('epochs').oninput = () => { const v = parseInt($('epochs').value); if (v >= 1 && !state.training) { state.epochsPlanned = v; drawCharts(); } };
 document.addEventListener('keydown', e => {
   if ((e.code !== 'Space' && e.code !== 'KeyB') || $('insp').open || $('rev').open || !state.stream) return;
@@ -2217,18 +2263,18 @@ function myRenderGraph2d() {
   for (let e = 0; e < C1F * C2F; e++) {
     const f = Math.floor(e / C1F), c = e % C1F, k = net.edge[e], cross = myIsl1(c, G) !== myIsl2(f, G), isCand = k === 3 || (t.type === 'D' && cross && k === 0);
     let cls, vis;
-    if (isCand) { cls = 2; vis = $('myShC').checked; } else if (k === 0) continue; else if (k === 2 || (t.type === 'A' && cross)) { cls = 1; vis = $('myShB').checked; } else { cls = 0; vis = $('myShW').checked; }
+    if (isCand) { cls = 2; vis = $('myShC').checked; } else if (k === 0) continue; else if ((k === 2 && t.type !== 'E') || ((t.type === 'A' || t.type === 'E') && cross)) { cls = 1; vis = $('myShB').checked; } else { cls = 0; vis = $('myShW').checked; }
     if (vis) order[cls].push(e);
   }
   for (const e of [...order[2], ...order[0], ...order[1]]) {
     const f = Math.floor(e / C1F), c = e % C1F, k = net.edge[e], cross = myIsl1(c, G) !== myIsl2(f, G), x1 = X[1], y1 = yy(c, C1F), x2 = X[2], y2 = yy(f, C2F);
     const abl = myAbl.e.has(e) || ablNode('c1', c) || ablNode('c2', f), a = dim(touches('c1', c) || touches('c2', f));
-    const isCand = k === 3 || (t.type === 'D' && cross && k === 0), isBr = k === 2 || (t.type === 'A' && cross && k === 1);
+    const isCand = k === 3 || (t.type === 'D' && cross && k === 0), isBr = (k === 2 && t.type !== 'E') || ((t.type === 'A' || t.type === 'E') && cross && k > 0);
     let stroke, w = net.w && $('myShWt').checked ? 0.6 + 5 * Math.min(1, mw[e] / maxM) : (isBr ? 2.6 : 1.6), dash = '';
-    if (isCand) { stroke = '#8b9aac'; dash = '2 4'; if (!$('myShWt').checked) w = 1; } else if (isBr) { stroke = t.type === 'A' ? '#c9d2dc' : '#ef6b73'; dash = t.type === 'A' ? '' : '9 4'; } else stroke = col(myIsl1(c, G));
+    if (isCand) { stroke = '#8b9aac'; dash = '2 4'; if (!$('myShWt').checked) w = 1; } else if (isBr) { stroke = t.type === 'A' || t.type === 'E' ? '#c9d2dc' : '#ef6b73'; dash = t.type === 'A' || t.type === 'E' ? '' : '9 4'; } else stroke = col(myIsl1(c, G));
     if (abl) { stroke = '#777'; dash = '8 3 2 3'; }
     s += '<line class="edge" data-e="' + e + '" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + stroke + '" stroke-width="' + w.toFixed(2) + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + ' opacity="' + a + '"><title>conv1 ' + c + ' to conv2 ' + f + ': ' + myEdgeStatus(net, e) + '</title></line>';
-    if (isBr && t.type !== 'A' && $('myShB').checked) { bn++; s += '<text x="' + ((x1 + x2) / 2 + (bn % 3 - 1) * 14) + '" y="' + ((y1 + y2) / 2 - 3) + '" text-anchor="middle" opacity="' + a + '" fill="#ffb3b8" style="fill:#ffb3b8">B' + c + '&gt;' + f + '</text>'; }
+    if (isBr && t.type !== 'A' && t.type !== 'E' && $('myShB').checked) { bn++; s += '<text x="' + ((x1 + x2) / 2 + (bn % 3 - 1) * 14) + '" y="' + ((y1 + y2) / 2 - 3) + '" text-anchor="middle" opacity="' + a + '" fill="#ffb3b8" style="fill:#ffb3b8">B' + c + '&gt;' + f + '</text>'; }
     if (abl) s += '<text x="' + ((x1 + x2) / 2) + '" y="' + ((y1 + y2) / 2 + 4) + '" text-anchor="middle" style="fill:#ef6b73;font-size:14px">&#10005;</text>';
   }
   s += '<rect x="' + (X[0] - 28) + '" y="' + (yy(0, 1) - 12) + '" width="56" height="24" rx="4" fill="#1f2a36" stroke="#8b9aac"/><text x="' + X[0] + '" y="' + (yy(0, 1) + 4) + '" text-anchor="middle">RGB</text>';
@@ -2281,7 +2327,7 @@ function myRenderIB() {
 async function myNeedPx(set, label) { for (let i = 0; i < set.length; i++) { await getBytes(set[i]); if (i % 10 === 9) { $(label).textContent = 'Decoding images ' + (i + 1) + ' / ' + set.length + ' ...'; await tick(); } } }
 async function myComputeActs() {
   const net = myLive(); if (!net) { $('myActOut').textContent = 'No model in memory. Train or load weights first.'; return; }
-  const sp = currentSplit(), w = $('myActSet').value, set = w === 'val' ? sp.val : (w === 'train' ? sp.train : state.samples);
+  const sp = currentSplit(), w = $('myActSet').value, set = w === 'val' ? sp.val : (w === 'train' ? sp.train : sp.train.concat(sp.val));
   if (!set.length) { $('myActOut').textContent = 'That split has no images.'; return; }
   await myNeedPx(set, 'myActOut'); const buf = new Float32Array(IN * IN * 3), r = myRunSet(net, set, buf, true), lab = set.map(s => s.cls), G = net.topo.G;
   const i1 = Array.from({ length: C1F }, (_, c) => myIsl1(c, G)), i2 = Array.from({ length: C2F }, (_, f) => myIsl2(f, G)), c1 = myCorr(r.A1), c2 = myCorr(r.A2);
@@ -2333,7 +2379,7 @@ function myRenderAblUi() {
   el.innerHTML = h + (nb ? '' : '(none)') + '</div>';
 }
 function myAblSpec() { return { c1: [...myAbl.c1], c2: [...myAbl.c2], e: [...myAbl.e] }; }
-async function myAblSet() { const sp = currentSplit(); let set = $('myAblSet').value === 'val' ? sp.val : state.samples, lab = $('myAblSet').value === 'val' ? 'validation' : 'all-image'; if (!set.length) { set = state.samples; lab = 'all-image'; } await myNeedPx(set, 'myAblOut'); return { set, lab }; }
+async function myAblSet() { const sp = currentSplit(), nt = sp.train.concat(sp.val); let set = $('myAblSet').value === 'val' ? sp.val : nt, lab = $('myAblSet').value === 'val' ? 'validation' : 'train and validation'; if (!set.length) { set = nt; lab = 'train and validation'; } await myNeedPx(set, 'myAblOut'); return { set, lab }; }
 async function myAblRun() {
   const net = myLive(), out = $('myAblOut'); if (!net) { out.textContent = 'No model in memory.'; return; }
   const sp = myAblSpec(); if (!sp.c1.length && !sp.c2.length && !sp.e.length) { out.textContent = 'Tick at least one element first.'; return; }
@@ -2390,13 +2436,14 @@ function myValAcc(net, val) { if (!val.length) return null; const r = myRunSet(n
 function myRecordRun(net, sp, secs, seed) {
   const val = sp.val, buf = new Float32Array(IN * IN * 3), t = net.topo; let sm = null, ms = null;
   if (val.length) { let r; const t0 = performance.now(); for (let k = 0; k < 3; k++) r = myRunSet(net, val, buf); ms = (performance.now() - t0) / (3 * val.length); sm = mySummary(val, r.pred, net.N); }
-  myRuns[t.type] = { type: t.type, desc: myDesc(t), G: t.G, K: t.K, seed, classes: state.classes.slice(), layout: layoutKey(), secs, ms, sm, c: myCounts(net), split: myHash(val.map(pathOf).join('|') + '#' + sp.train.length), nval: val.length, ntr: sp.train.length, sel: t.sel.map(x => x.slice()), hist: t.hist, runId: net.runId, spec: null, abl: null };
+  myRuns[t.type] = { type: t.type, desc: myDesc(t), G: t.G, K: t.K, seed, classes: state.classes.slice(), layout: layoutKey(), secs, ms, sm, c: myCounts(net), split: mySplitId(sp), nval: val.length, ntr: sp.train.length, sel: t.sel.map(x => x.slice()), hist: t.hist, runId: net.runId, spec: null, abl: null };
 }
 async function onTrain() {
   if (state.training) return;
   const N = state.classes.length;
   if (N < 2) { alert('Need at least 2 classes with images. Load an SD card folder or zip first.'); return; }
-  const want = myReadTopo(), terr = myTopoCheck(want); if (terr) { alert(terr); return; }
+  const want = myReadTopo(); if (want.type === 'E') { alert('Model E is made from a trained model A: use "Make E" on the Compare tab.'); return; }
+  const terr = myTopoCheck(want); if (terr) { alert(terr); return; }
   const o = { lr: parseFloat($('lr').value), batch: parseInt($('batch').value), epochs: parseInt($('epochs').value), dropout: parseFloat($('dropout').value) || 0, augment: $('augment').checked, maxStep: MAX_STEP };
   if (!(o.lr > 0) || !(o.batch >= 1) || !(o.epochs >= 1) || o.dropout < 0 || o.dropout >= 1) { alert('Check the training settings: learning rate > 0, batch >= 1, epochs >= 1, dropout 0 to 0.8.'); return; }
   let seed = parseInt($('mySeed').value); if (!(seed > 0)) seed = 1 + Math.floor(Math.random() * 2147483646);
@@ -2468,14 +2515,14 @@ async function myRepeat() {
 //  v004 MODEL STORE: independent snapshots of A-D, default device model, model-set bundle
 //  Each entry keeps a v001 model bundle (weights as float32 base64 + topology + class labels), never a live reference to the active net.
 // ======================================================================
-const myStore = {}; let myDefDev = null;
+const myStore = {}, myTestScores = {}, myTestLooks = {}, myDevMs = {}; let myDefDev = null, mySweep = null;
 const myIsStored = net => Object.values(myStore).some(e => e.runId === net.runId && e.ver === net.ver);
 const myStoreOk = e => e.layout === layoutKey() && JSON.stringify(e.classes) === JSON.stringify(state.classes);
 function myStorePut(net, seed, o, sp) {
   if (!weightsFinite(net)) { log('Model not stored: weights contain NaN or Infinity.'); return; }
-  const ty = net.topo.type, r = myRuns[ty], had = !!myStore[ty];
+  const ty = net.topo.type, r = myRuns[ty], had = !!myStore[ty]; delete myTestScores[ty];
   myStore[ty] = { type: ty, desc: myDesc(net.topo), bundle: myBuildBundle(net, state.classes, { valAcc: r && r.sm ? r.sm.acc : null, nval: sp.val.length, ntr: sp.train.length }),
-    layout: layoutKey(), classes: state.classes.slice(), seed, epochs: o.epochs, lr: o.lr, batch: o.batch, acc: r && r.sm ? r.sm.acc : null, nval: sp.val.length, runId: net.runId, ver: net.ver, saved: false };
+    layout: layoutKey(), classes: state.classes.slice(), seed, epochs: o.epochs, lr: o.lr, batch: o.batch, acc: r && r.sm ? r.sm.acc : null, nval: sp.val.length, runId: net.runId, ver: net.ver, saved: false, split: r ? r.split : null };
   log('Stored model ' + ty + (had ? ' (replaced the earlier stored ' + ty + ')' : '') + '. Other stored models are untouched.'); myRenderStore();
 }
 function myNetFromStore(k) { try { return myImportBundle(myStore[k].bundle, state.classes); } catch (e) { log('Stored model ' + k + ' refused: ' + e.message); return null; } }
@@ -2517,44 +2564,179 @@ async function myLoadSetFile(inp) {
   myRenderStore();
 }
 function myRenderStore() {
-  const el = $('myStoreBox'); if (!el) return; const ks = ['A', 'B', 'C', 'D'];
+  const el = $('myStoreBox'); if (!el) return; const ks = ['A', 'B', 'C', 'D', 'E'];
   const rows = ks.map(k => { const e = myStore[k]; if (!e) return [k + ' ' + MY_TYPES[k], '<span class="note">empty</span>', '', '', '', ''];
     const ok = myStoreOk(e), act = state.net && state.net.runId === e.runId, st = !ok ? '<span class="bad">incompatible (layout or class labels changed)</span>' : (act ? (state.net.ver === e.ver ? 'active' : '<span class="warn">active, modified</span>') : 'available') + (e.saved ? ', in a saved file' : ', not saved to a file');
-    return [(myDefDev === k ? '&#9733; ' : '') + k + ' ' + MY_TYPES[k], st, esc(e.desc) + '<br><span class="note">seed ' + e.seed + ', ' + e.epochs + ' epochs, classes ' + esc(e.classes.join('/')) + '</span>', myPct(e.acc) + (e.nval ? ' (' + e.nval + ' val)' : ''),
+    return [(myDefDev === k ? '&#9733; ' : '') + k + ' ' + MY_TYPES[k], st, esc(e.desc) + '<br><span class="note">seed ' + e.seed + ', ' + e.epochs + ' epochs, classes ' + esc(e.classes.join('/')) + '</span>', myPct(e.acc) + (e.nval ? ' (' + e.nval + ' val)' : ''), myTestCell(k),
       '<button class="tabbtn" ' + (ok ? '' : 'disabled') + ' onclick="myUseModel(\'' + k + '\')">Make active</button> <button class="tabbtn" ' + (ok ? '' : 'disabled') + ' onclick="myPickDefault(\'' + k + '\')">Set as default</button> <button class="tabbtn" onclick="myDlModel(\'' + k + '\')">Save</button>']; });
-  el.innerHTML = '<h3>Stored models (A to D)</h3><div class="info"><div><b>Active Model</b>: the one you are inspecting or training now.</div><div><b>Stored Models</b>: separate copies of A to D in this tab. Training one never changes another. They are lost on page reload unless saved.</div><div><b>Default Device Model</b>: the one exported to the device. Only you change it (&#9733;).</div><div><b>Saved Model Bundle</b>: a .json file with one or all stored models and the default choice. Device export stays a single myWeights.bin.</div></div>'
-    + myTbl(['Model', 'Status', 'Architecture and training', 'Validation accuracy', 'Actions'], rows.map(r => r.slice(0, 5)))
+  el.innerHTML = '<h3>Stored models (A to E)</h3><div class="info"><div><b>Active Model</b>: the one you are inspecting or training now.</div><div><b>Stored Models</b>: separate copies of A to D in this tab. Training one never changes another. They are lost on page reload unless saved.</div><div><b>Default Device Model</b>: the one exported to the device. Only you change it (&#9733;).</div><div><b>Saved Model Bundle</b>: a .json file with one or all stored models and the default choice. Device export writes the Default Device Model as myWeights.bin (what the firmware loads), and every stored model as A-myWeights.bin to E-myWeights.bin beside it. config.json names the active model.</div><div><b>Test accuracy</b>: each stored model can be scored once on the held-out test images. Nothing else ever touches them.</div></div>'
+    + myLooksNote() + myTbl(['Model', 'Status', 'Architecture and training', 'Validation accuracy', 'Test accuracy (scored once)', 'Actions'], rows.map(r => r.slice(0, 6)))
     + '<div class="row"><button class="tabbtn" onclick="myDlAll()">Save all stored models (bundle)</button><button class="tabbtn" onclick="$(\'mySetFile\').click()">Load bundle or single model file</button><input type="file" id="mySetFile" accept=".json" hidden onchange="myLoadSetFile(this)"></div><p class="note" id="myStoreMsg"></p><p class="note">The comparison table below uses the run recorded for each architecture. Models loaded from a file appear above but have no recorded run until retrained. To inspect, ablate or continue one, press Make active.</p>';
   const d = $('myDevInfo'); if (!d) return; const e = myStore[myDefDev];
   d.innerHTML = !Object.keys(myStore).length ? 'Export uses the active model (no stored models yet).' : !e ? '<span class="warn">No Default Device Model chosen. Pick one in the Compare tab (Stored models) before exporting.</span>'
     : '<div>Device export will use <b>' + esc(myDefDev + ' ' + e.desc) + '</b>, classes ' + esc(e.classes.join(', ')) + ', validation accuracy ' + myPct(e.acc) + '.</div>' + (myStoreOk(e) ? '<div class="ok">Matches the current layout ' + esc(layoutKey()) + ' and class labels.</div>' : '<div class="bad">Does not match the current layout or class labels: the firmware config would not fit. Export is refused.</div>');
 }
 
+
+function mySplitId(sp) { return myHash(sp.val.map(pathOf).join('|') + '#' + sp.train.length + '#' + sp.test.map(pathOf).join('|')); }
+function myTestCell(k) {
+  const ts = myTestScores[k], e = myStore[k];
+  if (ts) return myPct(ts.acc) + ' (' + ts.n + ' test images' + (ts.times > 1 ? ', <span class="warn">scored ' + ts.times + ' times</span>' : '') + (ts.verified ? '' : ', <span class="warn">split not verified</span>') + ')';
+  return '<button class="tabbtn" ' + (e && myStoreOk(e) ? '' : 'disabled') + ' onclick="myScoreTest(\'' + k + '\')">Score on test set</button>';
+}
+function myLooksNote() {
+  if (!state.samples.length) return '';
+  const sp = currentSplit(); if (!sp.test.length) return '<p class="warn">No test images are held out. Set "Test images per class" in section 3 above 0 and train again.</p>';
+  const n = myTestLooks[myHash(sp.test.map(pathOf).join('|'))] || 0;
+  return '<p class="note">Test set: ' + sp.test.length + ' images, scored ' + n + ' time' + (n === 1 ? '' : 's') + ' so far. Each stored model is scored once. If you pick the model that scores best here, the number is no longer an unbiased estimate, so fix your choice rule before you look.</p>';
+}
+async function myScoreTest(k) {
+  const e = myStore[k], m = $('myStoreMsg'); if (!e || !myStoreOk(e) || state.training) return;
+  const sp = currentSplit(); if (!sp.test.length) { m.innerHTML = '<span class="bad">No test images are held out. Set "Test images per class" in section 3 above 0 and train again.</span>'; return; }
+  const sid = mySplitId(sp), verified = e.split === sid;
+  if (e.split && !verified) { m.innerHTML = '<span class="bad">Model ' + k + ' was trained on a different split, so some current test images may have been training images. Retrain it with this split.</span>'; return; }
+  if (!e.split && !confirm('Model ' + k + ' has no record of the split it was trained on (loaded from a file). Some test images may have been training images. Score anyway?')) return;
+  const prev = myTestScores[k]; if (prev && !confirm('Model ' + k + ' was already scored on the test set. Scoring again is another look at it. Continue?')) return;
+  const net = myNetFromStore(k); if (!net) return;
+  await myNeedPx(sp.test, 'myStoreMsg');
+  const r = myRunSet(net, sp.test, new Float32Array(IN * IN * 3)), sm = mySummary(sp.test, r.pred, net.N), tid = myHash(sp.test.map(pathOf).join('|'));
+  myTestScores[k] = { acc: sm.acc, perClass: sm.perClass, n: sp.test.length, loss: myLossOf(r, sp.test), split: sid, verified, times: (prev ? prev.times : 0) + 1, at: new Date().toISOString() };
+  myTestLooks[tid] = (myTestLooks[tid] || 0) + 1;
+  log('Test set scored for model ' + k + ': ' + myPct(sm.acc) + ' on ' + sp.test.length + ' images.');
+  myRenderStore(); myRenderCmp();
+}
+function myBundleCfg() {
+  const act = Object.keys(myStore).length ? myDefDev : (state.net ? state.net.topo.type : null), models = {};
+  for (const k of ['A', 'B', 'C', 'D', 'E']) {
+    const e = myStore[k]; if (!e || !myStoreOk(e)) continue; const net = myNetFromStore(k), c = net ? myCounts(net) : null, ts = myTestScores[k];
+    models[k] = { weightsFile: 'header/' + k + '-myWeights.bin', graphConfigFile: 'header/' + k + '-graph-config.json', description: e.desc, seed: e.seed, epochs: e.epochs, activeEdges: c ? c.on : null, possibleEdges: c ? c.possible : null, macsPerImage: c ? c.macs : null,
+      validationAccuracy: e.acc, validationImages: e.nval, testAccuracy: ts ? ts.acc : null, testImages: ts ? ts.n : null, isActive: k === act };
+  }
+  let split = null; if (state.samples.length) { const sp = currentSplit(), s = splitParams(); split = { rule: s.mode, validationAmount: s.p, testAmount: testParam(), trainImages: sp.train.length, validationImages: sp.val.length, testImages: sp.test.length }; }
+  return { active_model: act, active_weights_file: 'header/myWeights.bin', data_split: split, models };
+}
+function myModelFiles() {
+  const out = [];
+  for (const k of ['A', 'B', 'C', 'D', 'E']) {
+    const e = myStore[k]; if (!e || !myStoreOk(e)) continue; const net = myNetFromStore(k); if (!net || !weightsFinite(net)) continue;
+    out.push({ k, bytes: new Uint8Array(serializeWeights(net)), graph: myGraphCfgText(net, 'header/' + k + '-myWeights.bin') });
+  }
+  return out;
+}
+async function myMakeE(refKey, quiet) {
+  if (state.training) return false;
+  refKey = refKey || $('myERef').value; const msg = t => { $('myStoreMsg').textContent = t; log(t); }, a = myStore.A, ref = myStore[refKey];
+  if (!a || !myStoreOk(a)) { msg('Model E starts from a stored, compatible model A. Train A first.'); return false; }
+  if (!ref || !myStoreOk(ref)) { msg('Model E matches the edge count of stored model ' + refKey + ', which is missing or incompatible. Train it first or pick another reference.'); return false; }
+  const N = state.classes.length, sp = currentSplit(); if (!sp.train.length) { msg('No training images.'); return false; }
+  const o = { lr: parseFloat($('lr').value), batch: parseInt($('batch').value), epochs: parseInt($('myFt').value), dropout: parseFloat($('dropout').value) || 0, augment: $('augment').checked, maxStep: MAX_STEP };
+  if (!Number.isFinite(o.epochs) || o.epochs < 0) o.epochs = 10;
+  if (!(o.lr > 0) || !(o.batch >= 1)) { msg('Check learning rate and batch size in section 3.'); return false; }
+  const setSt = t => { $('trainStatus').textContent = t; $('myP0Status').textContent = t; };
+  const net = myNetFromStore('A'), refNet = myNetFromStore(refKey); if (!net || !refNet) return false;
+  const M = myCounts(refNet).on, sc = [];
+  for (let e = 0; e < C1F * C2F; e++) { const f = Math.floor(e / C1F), c = e % C1F, b = f * 9 * C1F + c * 9; let q = 0; for (let i = 0; i < 9; i++) q += net.w.c2w[b + i] * net.w.c2w[b + i]; sc.push([e, q]); }
+  sc.sort((x, y) => y[1] - x[1] || x[0] - y[0]);
+  const sel = sc.slice(0, M).map(x => x[0]).sort((x, y) => x - y).map(e => [Math.floor(e / C1F), e % C1F]);
+  const accDense = myValAcc(net, sp.val);
+  net.topo = Object.assign(myDefaultTopo(), { type: 'E', G: refNet.topo.G, K: M, stage: 'final', seed: a.seed, ft: o.epochs, sel });
+  net.edge = myEdges(net.topo); for (const k of PARAM_ORDER) { net.m[k].fill(0); net.v[k].fill(0); } myEnforceMask(net); myRefreshGates(net);
+  const accPruned = myValAcc(net, sp.val); net.topo.hist = { accDense, accPruned, accFinal: accPruned };
+  state.training = true; state.stop = false; state.pause = false; setTrainButtons(); state.hist = { loss: [], tacc: [], vacc: [] }; drawCharts(); mySetSeed(a.seed);
+  try {
+    const all = sp.train.concat(sp.val); for (let i = 0; i < all.length; i++) { await getBytes(all[i]); if (i % 10 === 0) { setSt('Decoding images ' + (i + 1) + ' / ' + all.length + ' ...'); await tick(); } }
+    log('Model E: kept ' + M + ' of ' + C1F * C2F + ' conv1 to conv2 edges of A by kernel size (matching ' + refKey + '). Validation accuracy ' + myPct(accDense) + ' (A) to ' + myPct(accPruned) + ' (just pruned). Fine-tuning ' + o.epochs + ' epochs.');
+    state.epochsPlanned = Math.max(1, o.epochs); const buf = new Float32Array(IN * IN * 3), t0 = performance.now();
+    const hk = { input: s => bytesToFloat(s.px, buf), stopped: () => state.stop, paused: () => state.pause, onLog: m => log(m),
+      onBatch: b => setSt('E fine-tune epoch ' + b.epoch + '/' + o.epochs + '  batch ' + b.b + '/' + b.bpe + '  loss ' + b.loss.toFixed(4)),
+      onEpoch: e => { state.hist.loss.push(e.loss); state.hist.tacc.push(e.tacc); state.hist.vacc.push(e.vacc); drawCharts(); log('E epoch ' + e.epoch + '/' + o.epochs + '  loss ' + e.loss.toFixed(4) + (e.vacc == null ? '' : '  val acc ' + (e.vacc * 100).toFixed(1) + '%')); } };
+    state.net = net; myFxSync(net);
+    if (o.epochs > 0) await runTraining(net, sp.train, sp.val, o, hk);
+    net.topo.hist.accFinal = myValAcc(net, sp.val); net.ver++; state.wStatus = 'trained'; state.dirty = true; state.wNote = 'Model E made in this browser (not saved yet).'; state.evalStale = false;
+    const secs = (performance.now() - t0) / 1000; setSt('Model E ready in ' + secs.toFixed(1) + ' s.');
+    myRecordRun(net, sp, secs, a.seed); myStorePut(net, a.seed, o, sp);
+    renderSource(); renderModelInfo(); renderClasses(); await runEval();
+  } catch (e) { msg('Model E error: ' + e.message); }
+  state.training = false; state.pause = false; setTrainButtons(); myRenderGraphUI(); return true;
+}
+function myAgg(v) { const m = v.reduce((x, y) => x + y, 0) / v.length; return { m, n: v.length, sd: v.length > 1 ? Math.sqrt(v.reduce((x, y) => x + (y - m) ** 2, 0) / (v.length - 1)) : 0 }; }
+function myTake(ty, K, seed) { const r = myRuns[ty]; if (!r || !state.net || r.runId !== state.net.runId) return null; return { type: ty, K, seed, acc: r.sm ? r.sm.acc : null, on: r.c.on, macs: r.c.macs }; }
+async function myRunSweep() {
+  if (state.training) return; const N = state.classes.length; if (N < 2) { alert('Load a data source with at least 2 classes first.'); return; }
+  const G = parseInt($('myG').value), M = myCandidates(G).length, txt = $('myKList').value.trim();
+  let ks = txt ? txt.split(/[ ,]+/).map(Number) : [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(f * M));
+  ks = [...new Set(ks)].filter(k => Number.isInteger(k) && k >= 0 && k <= M).sort((x, y) => x - y); if (!ks.length) { alert('No valid K values. Use whole numbers from 0 to ' + M + '.'); return; }
+  const R = Math.max(1, Math.min(5, parseInt($('mySweepSeeds').value) || 1)), useE = $('mySweepE').checked, base = parseInt($('mySeed').value) > 0 ? parseInt($('mySeed').value) : 1000 + Math.floor(Math.random() * 100000);
+  if (!confirm('The sweep trains ' + R * (1 + 2 * ks.length) + ' models' + (useE ? ' plus ' + R * ks.length + ' pruned models' : '') + ' and replaces stored A, C, D' + (useE ? ' and E' : '') + '. Continue?')) return;
+  const saved = { type: $('myType').value, seed: $('mySeed').value, cont: $('cont').checked, k: $('myK').value };
+  mySweep = { page: 'vision-cnn-sd-trainer ' + VERSION, layout: layoutKey(), classes: state.classes.slice(), G, possible: C1F * C2F, candidates: M, seeds: R, seedBase: base, ks, points: [], ref: [] };
+  myBatch = true; $('cont').checked = false; log('K sweep: K = ' + ks.join(', ') + ', ' + R + ' seed(s) from ' + base + ', G = ' + G + '.');
+  try {
+    for (let r = 0; r < R && !state.stop; r++) {
+      const seed = base + r; $('mySeed').value = seed; $('myType').value = 'A'; await onTrain(); const ta = myTake('A', 0, seed); if (ta) mySweep.ref.push(ta); if (state.stop) break;
+      for (const K of ks) {
+        for (const ty of ['C', 'D']) {
+          $('myType').value = ty; $('myK').value = K; await onTrain(); const t = myTake(ty, K, seed); if (t) mySweep.points.push(t); if (state.stop) break;
+          if (ty === 'D' && useE) { await myMakeE('D', true); const te = myTake('E', K, seed); if (te) mySweep.points.push(te); if (state.stop) break; }
+        }
+        myRenderSweep(); if (state.stop) break;
+      }
+    }
+  } finally { myBatch = false; $('cont').checked = saved.cont; $('mySeed').value = saved.seed; $('myType').value = saved.type; $('myK').value = saved.k; myRenderTopoInfo(); myRenderGraphUI(); myRenderSweep(); }
+}
+function myDlSweep() { if (!mySweep) { alert('Run the sweep first.'); return; } myDl('k-sweep-' + layoutKey() + '.json', JSON.stringify(mySweep, null, 2)); }
+function myRenderSweep() {
+  const el = $('myKSweepOut'); if (!el || !mySweep) return; const S = mySweep, ks = [...new Set(S.points.map(p => p.K))].sort((x, y) => x - y);
+  const get = (t, K) => { const v = S.points.filter(p => p.type === t && p.K === K && p.acc != null); return v.length ? { a: myAgg(v.map(p => p.acc)), on: v[0].on } : null; };
+  const fmt = g => g ? myPct(g.a.m) + (g.a.n > 1 ? ' &plusmn; ' + (100 * g.a.sd).toFixed(1) : '') : 'n/a', ra = S.ref.filter(p => p.acc != null), aa = ra.length ? myAgg(ra.map(p => p.acc)) : null;
+  const rows = ks.map(K => { const c = get('C', K), d = get('D', K), e = get('E', K), any = d || c || e; return [K, any ? any.on + ' / ' + S.possible : 'n/a', fmt(c), fmt(d), fmt(e)]; });
+  const W = 560, H = 260, L = 46, B = 34, T = 14, Rr = 14, X = on => L + on / S.possible * (W - L - Rr), Y = a => T + (1 - a) * (H - T - B), col = { C: '#e9b44c', D: '#66d1bd', E: '#ef6b73' };
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-width:640px" role="img" aria-label="Validation accuracy against active connections">';
+  for (let i = 0; i <= 4; i++) { const y = Y(i / 4); svg += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + y + '" y2="' + y + '" stroke="#2c3947"/><text x="' + (L - 6) + '" y="' + (y + 4) + '" text-anchor="end" font-size="11" fill="#8b9aac">' + (i * 25) + '%</text>'; }
+  for (let v = 0; v <= S.possible; v += Math.max(1, Math.round(S.possible / 8))) svg += '<text x="' + X(v) + '" y="' + (H - 16) + '" text-anchor="middle" font-size="11" fill="#8b9aac">' + v + '</text>';
+  svg += '<text x="' + (W / 2) + '" y="' + (H - 2) + '" text-anchor="middle" font-size="11" fill="#8b9aac">active conv1 to conv2 connections (of ' + S.possible + ')</text>';
+  if (aa) svg += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + Y(aa.m) + '" y2="' + Y(aa.m) + '" stroke="#c9d2dc" stroke-dasharray="6 4"/><text x="' + (L + 4) + '" y="' + (Y(aa.m) - 4) + '" font-size="11" fill="#c9d2dc">A (all connections) ' + myPct(aa.m) + '</text>';
+  for (const t of ['C', 'D', 'E']) {
+    const pts = ks.map(K => { const g = get(t, K); return g ? { x: X(g.on), y: Y(g.a.m), sd: g.a.sd } : null; }).filter(Boolean); if (!pts.length) continue;
+    svg += '<polyline fill="none" stroke="' + col[t] + '" stroke-width="2" points="' + pts.map(q => q.x + ',' + q.y).join(' ') + '"/>';
+    pts.forEach(q => { if (q.sd > 0) svg += '<line x1="' + q.x + '" x2="' + q.x + '" y1="' + Math.max(T, q.y - q.sd * (H - T - B)) + '" y2="' + Math.min(H - B, q.y + q.sd * (H - T - B)) + '" stroke="' + col[t] + '"/>'; svg += '<circle cx="' + q.x + '" cy="' + q.y + '" r="3.5" fill="' + col[t] + '"/>'; });
+  }
+  svg += '</svg><div class="note"><span style="color:#e9b44c">&#9632;</span> C fixed bridges &nbsp; <span style="color:#66d1bd">&#9632;</span> D learned bridges &nbsp; <span style="color:#ef6b73">&#9632;</span> E pruned dense (same edge count as D) &nbsp; dashed: A. Bars show one standard deviation across seeds.</div>';
+  el.innerHTML = '<p class="note">Validation accuracy, ' + S.seeds + ' seed(s) per point, ' + S.G + ' islands, layout ' + esc(S.layout) + '. Not the test set.</p>' + svg + myTbl(['K (bridges)', 'Active connections', 'C fixed', 'D learned', 'E pruned'], rows);
+}
+
 // ---------- Compare ----------
 function myRenderCmp() {
   myRenderStore();
-  const el = $('myCmp'), ks = ['A', 'B', 'C', 'D'].filter(k => myRuns[k]); if (!ks.length) { el.innerHTML = '<p class="note">No runs recorded yet. Train a model, or press Train all four.</p>'; return; }
+  const el = $('myCmp'), ks = ['A', 'B', 'C', 'D', 'E'].filter(k => myRuns[k]); if (!ks.length) { el.innerHTML = '<p class="note">No runs recorded yet. Train a model, or press Train all four.</p>'; return; }
   const cur = layoutKey(), cls = JSON.stringify(state.classes), sp = new Set(ks.map(k => myRuns[k].split)); let h = '';
   if (sp.size > 1) h += '<p class="warn">These runs used different train/validation splits. Accuracy differences are not a fair comparison.</p>';
   ks.forEach(k => { const r = myRuns[k]; if (r.layout !== cur || JSON.stringify(r.classes) !== cls) h += '<p class="warn">Run ' + k + ' used layout ' + r.layout + ' and classes [' + esc(r.classes.join(', ')) + '], not the current ones.</p>'; });
   const NA = 'not measured';
   h += myTbl(['Measure'].concat(ks.map(k => k + ' ' + MY_TYPES[k])), [
     ['Validation accuracy (' + myRuns[ks[0]].nval + ' images)'].concat(ks.map(k => myPct(myRuns[k].sm && myRuns[k].sm.acc))),
+    ['Test accuracy (scored once, ' + (currentSplit().test.length) + ' images now held out)'].concat(ks.map(k => myTestScores[k] ? myPct(myTestScores[k].acc) + (myTestScores[k].times > 1 ? ' (scored ' + myTestScores[k].times + 'x)' : '') : 'not scored (Stored models above)')),
     ['Per-class accuracy'].concat(ks.map(k => myRuns[k].sm ? myRuns[k].sm.perClass.map(v => myPct(v)).join(' / ') : 'n/a')),
     ['Classes (order)'].concat(ks.map(k => esc(myRuns[k].classes.join(' / ')))),
     ['Active conv1&rarr;conv2 connections'].concat(ks.map(k => myRuns[k].c.on + ' / ' + myRuns[k].c.possible)),
-    ['Bridges'].concat(ks.map(k => k === 'A' ? 'n/a (dense)' : myRuns[k].c.cross)),
+    ['Bridges'].concat(ks.map(k => k === 'A' ? 'n/a (dense)' : (k === 'E' ? 'n/a (pruned, no islands)' : myRuns[k].c.cross))),
     ['Active parameters'].concat(ks.map(k => myRuns[k].c.active.toLocaleString())),
     ['Conv1&rarr;conv2 sparsity'].concat(ks.map(k => myPct(1 - myRuns[k].c.on / myRuns[k].c.possible))),
     ['MACs per image'].concat(ks.map(k => myRuns[k].c.macs.toLocaleString())),
+    ['Predicted speedup from MACs (dense = 1.00x)'].concat(ks.map(k => (myRuns[k].c.macsDense / myRuns[k].c.macs).toFixed(2) + 'x')),
+    ['Weight bytes if stored compactly (kernels + 1 bit per edge)'].concat(ks.map(k => (myRuns[k].c.active * 4 + Math.ceil(myRuns[k].c.possible / 8)).toLocaleString() + ' of ' + (myRuns[k].c.stored * 4).toLocaleString())),
+    ['Pooled conv1 maps resident at once, island-by-island schedule (floats)'].concat(ks.map(k => myRuns[k].c.resident.toLocaleString() + ' of ' + myRuns[k].c.residentDense.toLocaleString())),
     ['Browser inference ms/image (not device)'].concat(ks.map(k => myNum(myRuns[k].ms, 2))),
+    ['Measured on the device (ms/image, type it in)'].concat(ks.map(k => '<input type="number" step="0.1" min="0" style="width:90px" value="' + (myDevMs[k] || '') + '" onchange="myDevMs[\'' + k + '\']=parseFloat(this.value)||null;myRenderCmp()">')),
+    ['Measured speedup vs A'].concat(ks.map(k => myDevMs[k] && myDevMs.A ? (myDevMs.A / myDevMs[k]).toFixed(2) + 'x' : 'n/a')),
     ['Training time (s)'].concat(ks.map(k => myRuns[k].secs.toFixed(1))),
     ['Seed'].concat(ks.map(k => myRuns[k].seed)), ['Split id'].concat(ks.map(k => myRuns[k].split)),
     ['D accuracy: gated / after selection / fine-tuned'].concat(ks.map(k => k === 'D' && myRuns[k].hist ? myPct(myRuns[k].hist.accGated) + ' / ' + myPct(myRuns[k].hist.accSelected) + ' / ' + myPct(myRuns[k].hist.accFinal) : 'n/a')),
+    ['E accuracy: dense A / just pruned / fine-tuned'].concat(ks.map(k => k === 'E' && myRuns[k].hist ? myPct(myRuns[k].hist.accDense) + ' / ' + myPct(myRuns[k].hist.accPruned) + ' / ' + myPct(myRuns[k].hist.accFinal) : 'n/a')),
     ['Activation specialisation (conv2 within minus between r)'].concat(ks.map(k => myRuns[k].spec ? myNum(myRuns[k].spec.gap) + ' (' + myRuns[k].spec.split + ')' : NA + ' (Activations tab)')),
     ['Largest accuracy drop: island / bridge / channel'].concat(ks.map(k => myRuns[k].abl ? [myRuns[k].abl.island, myRuns[k].abl.bridge, myRuns[k].abl.channel].map(v => v == null ? 'n/a' : (100 * v).toFixed(1) + ' pts').join(' / ') : NA + ' (Ablation tab, run on the live model)'))]);
   const A = myRuns.A, a = k => myRuns[k] && myRuns[k].sm ? myRuns[k].sm.acc : null, d = (x, y, t) => a(x) != null && a(y) != null ? '<li>' + t + ': ' + ((a(x) - a(y)) * 100 >= 0 ? '+' : '') + ((a(x) - a(y)) * 100).toFixed(1) + ' points (one seed each)</li>' : '';
-  const hy = d('B', 'A', 'H1 isolation cost, B minus A') + d('C', 'B', 'H2 fixed bridges, C minus B') + d('D', 'C', 'H3 learned vs fixed at equal budget, D minus C');
+  const hy = d('B', 'A', 'H1 isolation cost, B minus A') + d('C', 'B', 'H2 fixed bridges, C minus B') + d('D', 'C', 'H3 learned vs fixed at equal budget, D minus C') + d('E', 'A', 'H4 cost of pruning, E minus A') + d('D', 'E', 'H5 learned archipelago vs plain pruning at equal edge count (E matched to D), D minus E');
   if (hy) h += '<p>Differences on the validation set:</p><ul>' + hy + '</ul><p class="note">Small validation sets move by whole images; a difference of a few points can be one image. Repeat across seeds before concluding. When you add a class (H6), classes change, so old runs are flagged above and must be retrained to compare.</p>';
   for (const k of Object.keys(myReps)) { const R = myReps[k], v = R.reps.map(r => r.acc).filter(x => x != null), m = v.reduce((x, y) => x + y, 0) / (v.length || 1), sd = Math.sqrt(v.reduce((x, y) => x + (y - m) ** 2, 0) / (v.length || 1));
     h += '<h3>Model ' + k + ' across ' + R.reps.length + ' seeds</h3><p>Validation accuracy mean ' + myPct(m) + ', std ' + (100 * sd).toFixed(1) + ' pts (' + R.reps.map(r => 's' + r.seed + ': ' + myPct(r.acc)).join(', ') + ').</p>';
@@ -2565,7 +2747,7 @@ function myRenderCmp() {
 }
 // ---------- Configuration, bundle, binding on load ----------
 const myCfgNet = () => { const g = myCur(); return g.net; };
-function myGraphCfgText(n) { return JSON.stringify(myConfigObj(n || myCfgNet(), state.classes, { weightsFile: 'header/myWeights.bin', weightsLayout: 'dense, off connections are exact zeros' }), null, 2); }
+function myGraphCfgText(n, file) { return JSON.stringify(myConfigObj(n || myCfgNet(), state.classes, { weightsFile: file || 'header/myWeights.bin', weightsLayout: 'dense, off connections are exact zeros' }), null, 2); }
 function myRenderCfg() {
   $('myCfgTxt').value = myGraphCfgText(); const N = Math.max(2, state.classes.length);
   $('myFmtDoc').textContent = 'Layout ' + layoutKey() + ', ' + N + ' classes. float32 little-endian, file order c1w, c1b, c2w, c2b, ow, ob (unchanged from v006):\n  c1w [' + C1F + '][3][3][3]   index f*27 + ky*9 + kx*3 + ch\n  c1b [' + C1F + ']\n  c2w [' + C2F + '][' + C1F + '][3][3]   index f*' + (9 * C1F) + ' + c*9 + ky*3 + kx   (f = conv2 filter, c = conv1 channel)\n  c2b [' + C2F + ']\n  ow  [' + N + '][' + FLAT + ']   index k*' + FLAT + ' + f*' + (C2O * C2O) + ' + y*' + C2O + ' + x\n  ob  [' + N + ']\nActivations: leaky ReLU 0.1, values clipped to +-100, max pool 2x2, logits clipped to +-50, softmax.\nConnectivity: edge (f,c) is active when edgeMask[f][c] = 1 (graph-config.json, or myConnMask.h). Edge index = f*conv1Filters + c.\nOff edges hold exactly 0.0 in myWeights.bin, so the dense v007 loops should compute the same result; a future firmware can skip off edges to save multiply-accumulates (9 per output pixel per skipped edge).\nGate scores, candidate scores and bridge selection are training-only. Inference needs only the mask and weights. Island labels (islandOfConv1/2) are for analysis, not for computing.\nStatus: the dense equivalence was checked by reading firmware-v007 against this page, NOT by running it on a device. No firmware was changed.';
@@ -2753,7 +2935,7 @@ function myEdgeClass(net, e) {
   const f = Math.floor(e / C1F), c = e % C1F, G = net.topo.G, t = net.topo, k = net.edge[e], cross = myIsl1(c, G) !== myIsl2(f, G);
   if (k === 3 || (t.type === 'D' && cross && k === 0)) return 2;
   if (k === 0) return -1;
-  return (k === 2 || (t.type === 'A' && cross)) ? 1 : 0;
+  return ((k === 2 && t.type !== 'E') || ((t.type === 'A' || t.type === 'E') && cross)) ? 1 : 0;
 }
 
 function my3dBuild() {
@@ -2813,7 +2995,7 @@ function my3dBuild() {
     const f = Math.floor(e / C1F), c = e % C1F, w = useW ? 0.03 + 0.17 * mw[e] / maxM : (cls === 1 ? 0.1 : 0.06), ebc = my3dBc.edge(e), mark = myAbl.e.has(e), abl = mark || myAbl.c1.has(c) || myAbl.c2.has(f);
     const o = { abl, mark, meta: { kind: 'cv', c, f, e } };
     if (cls === 2) Object.assign(o, { r: 0.03, col: 0x8b9aac, op: 0.18 });
-    else if (cls === 1) Object.assign(o, { r: w * 1.4, col: t.type === 'A' ? 0xc9d2dc : 0xff6b4a, op: 0.95, arch: 2 + 3 * ebc, spin: e * 2.4, glow: t.type === 'A' ? 0 : 0.2 + 0.8 * ebc });
+    else if (cls === 1) Object.assign(o, { r: w * 1.4, col: t.type === 'A' || t.type === 'E' ? 0xc9d2dc : 0xff6b4a, op: 0.95, arch: 2 + 3 * ebc, spin: e * 2.4, glow: t.type === 'A' || t.type === 'E' ? 0 : 0.2 + 0.8 * ebc });
     else Object.assign(o, { r: w, col: new THREE.Color(myPal[myIsl1(c, G) % myPal.length]), op: 0.6 });
     addEdge('c1:' + c, 'c2:' + f, 'e:' + e, o);
   }
@@ -3114,7 +3296,7 @@ async function myCoachAnalyse() {
   const net = myLive(), out = $('myCoachStatus');
   if (!net) { out.textContent = 'Train or load a model first.'; return; }
   if (state.training) { out.textContent = 'Wait until training finishes.'; return; }
-  const sp = currentSplit(); let set = sp.val, lab = 'validation'; if (!set.length) { set = state.samples; lab = 'all-image'; }
+  const sp = currentSplit(); let set = sp.val, lab = 'validation'; if (!set.length) { set = sp.train.concat(sp.val); lab = 'train and validation'; }
   if (!set.length) { out.textContent = 'No images to analyse.'; return; }
   await myNeedPx(set, 'myCoachStatus'); out.textContent = 'Analysing ...'; await tick();
   myCoachDiagLast = myCoachDiag(net, set, new Float32Array(IN * IN * 3)); myCoachDiagLast.lab = lab;
