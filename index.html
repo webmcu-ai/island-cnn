@@ -22,13 +22,17 @@
         to the same edge count as a reference model, then fine-tuned: the baseline the island idea must beat), a K sweep (accuracy against bridge budget),
         a bigger scoreboard (test accuracy, predicted speedup, compact weight bytes, resident maps, measured device ms), a "What this page is for" panel, and
         Save writes A-myWeights.bin ... E-myWeights.bin next to myWeights.bin, with config.json naming the active model. Forward and backward pass unchanged.
+  v007: new tab "Trace & Explain" in section 4: step one image through input, conv1, pool, conv2, flatten and classifier with every multiplication shown, exact signed
+        contribution of each conv2 feature to a class score (or to the gap between two classes), and an intervention table (zero-ablation: change in logit on this image,
+        change in validation accuracy and loss). Reads the model only: forward pass, backward pass, myWeights.bin and config format are unchanged.
+  v008: the class bar chart under the Model Graph buttons now follows the live webcam (it was left on the last "Send one image through" result). Nothing else changed.
   Three.js r128 is loaded from cdnjs for the 3D view only. Without it (offline) the page works and shows the 2D schematic. MIT license. Use at your own risk.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vision CNN SD trainer v006 (test split, model E, K sweep)</title>
+<title>Island-CNN, Vision CNN SD trainer v008 (Trace &amp; Explain)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 :root{--bg:#11151b;--panel:#182029;--panel2:#1f2a36;--line:#2c3947;--text:#dde5ee;--mut:#8b9aac;--acc:#66d1bd;--acc-ink:#062a24;--bad:#ef6b73;--warn:#e9b44c;--ok:#7bd88f;--r:8px}
@@ -126,7 +130,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 </head>
 <body>
 <header>
-  <h1>Vision CNN SD trainer<span class="ver">v006 test split, model E, K sweep</span></h1>
+  <h1>Vision CNN SD trainer<span class="ver">v008 Trace &amp; Explain</span></h1>
   <p>Browser companion for the XIAO ESP32-S3 FULL VISION ML firmware (firmware-v007; firmware-v005 and later also give config.json class names and debug frames): load the SD card, add images, review and clean them, train the same CNN, then write myWeights.bin back to the card.</p>
   <p>Everything runs in this page. Images and weights never leave your computer.</p>
 </header>
@@ -288,7 +292,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
   <p class="note">Research tools for the conv1 to conv2 channel graph. Every result is labelled with the dataset split it was measured on. There is no separate test set: the validation images are used only to look at results, never to pick bridges (Model D picks them from gate scores learned on the training images). Structure, weights and ablations are evidence about this one trained model, not proof that a filter means something.</p>
   <div class="tabs" id="myTabs">
     <button class="tabbtn on" data-t="0">Train &amp; Predict</button><button class="tabbtn" data-t="1">Model Graph</button><button class="tabbtn" data-t="2">Islands &amp; Bridges</button><button class="tabbtn" data-t="3">Activations</button>
-    <button class="tabbtn" data-t="4">Ablation</button><button class="tabbtn" data-t="5">Graph Statistics</button><button class="tabbtn" data-t="6">Compare Models</button><button class="tabbtn" data-t="7">Configuration &amp; Export</button><button class="tabbtn" data-t="8">Coach &amp; Tuning</button>
+    <button class="tabbtn" data-t="4">Ablation</button><button class="tabbtn" data-t="5">Graph Statistics</button><button class="tabbtn" data-t="6">Compare Models</button><button class="tabbtn" data-t="7">Configuration &amp; Export</button><button class="tabbtn" data-t="8">Coach &amp; Tuning</button><button class="tabbtn" data-t="9">Trace &amp; Explain</button>
   </div>
   <div class="tabpane on" id="gp0">
     <div class="info" id="myP0Info"></div>
@@ -372,6 +376,22 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
     <div class="info" id="myCfgMsg">Config import sets the section 3 controls only. It never changes weights.</div>
     <h3>Current configuration (graph-config.json)</h3><textarea id="myCfgTxt" class="mono" readonly aria-label="Configuration JSON"></textarea>
     <h3>What future firmware must implement</h3><pre id="myFmtDoc"></pre>
+  </div>
+  <div class="tabpane" id="gp9">
+    <p class="note">Follow one image through the real forward pass, with every number taken from the model in memory. Nothing here changes weights, training or the exported files. Only training and validation images are listed.</p>
+    <div class="row" id="myTrBar"><select id="myTrIm" aria-label="Image" style="max-width:320px"></select><select id="myTrCls" onchange="myTrDraw()" aria-label="Class to explain"></select><select id="myTrVs" onchange="myTrDraw()" aria-label="Compare with a second class"></select><button class="primary" onclick="myTrRun()">Trace this image</button></div>
+    <div id="myTrOut"></div>
+    <details><summary>Guided experiment: switch off one filter and watch the prediction</summary>
+      <div style="padding:4px 14px 10px"><p><b>Question.</b> Which conv2 filters does this model rely on for one class?</p>
+      <p><b>Procedure.</b> Trace an image, open step 6, note the filters with the largest orange and blue sums, then press Measure. Compare the logit change of each filter with its contribution, then look at the validation columns for the same filters.</p>
+      <p><b>Measurements to record.</b> Change in logit and probability on this image, change in validation accuracy and loss, over several images and at least two seeds.</p>
+      <p><b>Confounders.</b> Filters that carry the same signal can hide each other's effect; a filter may matter only for some images; a small validation set gives noisy accuracy; one seed is an anecdote.</p>
+      <p><b>Cautious reading.</b> A large drop shows the model depends on that part. It does not show what the part means. Write down at least two competing explanations and one measurement that would separate them.</p></div>
+    </details>
+    <details><summary>Notebook</summary>
+      <div style="padding:4px 14px 10px"><label>Question<input type="text" id="myTrQ" placeholder="What are you testing?"></label><label>Observations and competing explanations<textarea id="myTrNote" class="mono" style="height:110px"></textarea></label>
+      <div class="row"><button onclick="myTrSaveNote()">Download notes (JSON, with model, seed, image and evidence)</button></div></div>
+    </details>
   </div>
   <div class="tabpane" id="gp8">
     <p class="note">One tuning plan, two authors. Every move below (encourage, reduce, freeze or prune an island, a channel or a bridge) is the same small record whether you click it, the coach proposes it, or you paste it as JSON. The plan changes how the next training steps treat those weights: encourage = learning rate x2, reduce = x0.5 and the weights shrink slightly, freeze = x0, prune = a bridge is removed for good. The forward and backward pass are not touched.</p>
@@ -542,7 +562,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 
 <script>
 'use strict';
-const VERSION = 'v006';
+const VERSION = 'v008';
 
 /* ==CORE START== (no DOM use below this line until CORE END) */
 
@@ -1805,6 +1825,7 @@ async function liveLoop() {
         const p = state.net.a.probs, top = argmax(p);
         $('liveBanner').textContent = state.classes[top] + '  ' + (p[top] * 100).toFixed(0) + '%';
         $('liveBars').innerHTML = barsHtml(p);
+        if (myTab === 1) $('myFlowOut').innerHTML = '<div><b>Live webcam:</b> predicted <b>' + esc(state.classes[top]) + ' ' + (p[top] * 100).toFixed(1) + '%</b></div>' + barsHtml(p);
         hv.imageSmoothingEnabled = false; hv.drawImage(capCanvas, 0, 0, 288, 288);
         if (heat.overlay) drawHeatOn(hv, 288, state.net, heat.agg);
       }
@@ -2232,7 +2253,7 @@ function myRenderGraphUI() {
 function myRenderTab() {
   document.querySelectorAll('#myTabs .tabbtn').forEach(b => b.classList.toggle('on', +b.dataset.t === myTab));
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('on', p.id === 'gp' + myTab));
-  ([myRenderP0, myRenderGraph, myRenderIB, myRenderActs, myRenderAblUi, myRenderStats, myRenderCmp, myRenderCfg, myRenderCoach][myTab])();
+  ([myRenderP0, myRenderGraph, myRenderIB, myRenderActs, myRenderAblUi, myRenderStats, myRenderCmp, myRenderCfg, myRenderCoach, myRenderTrace][myTab])();
 }
 function myRenderP0() {
   const g = myCur(); let h = '<div><b>' + esc(myDesc(g.net.topo)) + '</b>' + (g.live ? '' : ' (planned, no weights yet)') + '</div>';
@@ -2406,6 +2427,134 @@ async function myAblSweep() {
   const run = myRuns[net.topo.type]; if (run && run.runId === net.runId) run.abl = { split: lab, island: worst('isl'), bridge: worst('br'), channel: worst('ch') };
   res.sort((a, b) => a.d - b.d);
   out.innerHTML = '<p><b>' + lab + ' set, ' + set.length + ' images.</b> Baseline accuracy ' + myPct(base.acc) + '. Sorted by largest accuracy drop. Each row switches off one element at a time.</p>' + myTbl(['Element', 'accuracy', 'change'], res.map(r => [r.nm, myPct(r.acc), (r.d >= 0 ? '+' : '') + (100 * r.d).toFixed(1) + ' pts'])) + '<p class="note">Dependence under zero-ablation only; many elements can matter little individually yet matter together.</p>';
+}
+// ======================================================================
+//  v007 TRACE & EXPLAIN. Reads the model only: forward pass, backward pass, weight file and config are unchanged.
+// ======================================================================
+let myTr = null, myTrList = [];
+const myTrNames = ['1 Input', '2 conv1', '3 Pool', '4 conv2', '5 Flatten', '6 Classifier'];
+const myTrDoc = [
+  'Shows: the exact numbers the network receives (nearest-pixel resample of the 240x240 frame). Says nothing about the model yet.',
+  'Shows: one 3x3x3 filter slid over the image, as the forward pass computes it. Click a cell to see every multiplication. A bright cell is a strong response to that local pattern; it does not give the pattern a name.',
+  'Shows: max pooling keeps the largest of four conv1 cells, so position is blurred by up to one cell. Does not show why that value was large.',
+  'Shows: the sum over active source channels of 3x3 kernels, plus the bias. Each cell sees an 8x8 block of the model input. Edges that are off, pruned or unselected contribute exactly 0.',
+  'Shows: how the conv2 maps are laid end to end (filter, row, column) so the classifier can take a dot product. Nothing new is computed here.',
+  'Exact: logit = sum of (feature x weight) + bias, so the contributions add up to the class score. An activation is not a contribution, and a contribution is not a cause: use the intervention table for what happens when a part is switched off.'
+];
+function myTrPaint(id, side, fn, mk) {
+  const cv = $(id); if (!cv) return; cv.width = cv.height = side; const c = cv.getContext('2d'), im = c.createImageData(side, side);
+  for (let i = 0; i < side * side; i++) { const q = fn(i); im.data[i * 4] = q[0]; im.data[i * 4 + 1] = q[1]; im.data[i * 4 + 2] = q[2]; im.data[i * 4 + 3] = 255; }
+  c.putImageData(im, 0, 0); if (mk) { c.strokeStyle = '#fff'; c.lineWidth = Math.max(1, side / 64); c.strokeRect(mk[0], mk[1], mk[2], mk[3]); }
+}
+function myTrGray(arr, off, n) {
+  let lo = Infinity, hi = -Infinity; for (let i = 0; i < n; i++) { lo = Math.min(lo, arr[off + i]); hi = Math.max(hi, arr[off + i]); }
+  const sp = hi - lo || 1; return { lo, hi, fn: i => { const t = 255 * (arr[off + i] - lo) / sp; return [t, t, t]; } };
+}
+function myTrDiv(v, m) {   // orange = positive, blue = negative, dark = zero
+  const t = Math.min(1, Math.abs(v) / m); return v >= 0 ? [28 + 205 * t, 28 + 112 * t, 28 + 12 * t] : [28 + 42 * t, 28 + 102 * t, 28 + 202 * t];
+}
+function myRenderTrace() {
+  const net = myLive(), el = $('myTrOut'); $('myTrBar').style.display = net ? '' : 'none';
+  if (!net) { el.innerHTML = '<p class="note">No model in memory. Train or load weights first.</p>'; return; }
+  const sp = currentSplit(), L = sp.train.map(s => ['train', s]).concat(sp.val.map(s => ['val', s])).slice(0, 600);
+  myTrList = L.map(x => x[1]);
+  if ($('myTrIm').options.length !== L.length) $('myTrIm').innerHTML = L.map(([w, s], i) => '<option value="' + i + '">' + w + ' ' + esc(pathOf(s)) + '</option>').join('');
+  if ($('myTrCls').options.length !== state.classes.length) {
+    $('myTrCls').innerHTML = state.classes.map((k, i) => '<option value="' + i + '">explain class ' + esc(k) + '</option>').join('');
+    $('myTrVs').innerHTML = '<option value="-1">no comparison class</option>' + state.classes.map((k, i) => '<option value="' + i + '">minus class ' + esc(k) + '</option>').join('');
+  }
+  if (myTr && myTr.key === myActKey()) myTrDraw(); else el.innerHTML = '<p class="note">Choose an image and press Trace. Test images are not listed.</p>';
+}
+async function myTrRun() {
+  const net = myLive(); if (!net || !myTrList.length) return;
+  const s = myTrList[+$('myTrIm').value || 0], inp = bytesToFloat(await getBytes(s)); forward(net, inp); const a = net.a;
+  myTr = { key: myActKey(), s, inp, c1o: a.c1o.slice(), p1o: a.p1o.slice(), c2o: a.c2o.slice(), logits: a.logits.slice(), probs: a.probs.slice(), f1: 0, f2: 0, step: 0, p: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]], ev: '', evRows: null };
+  $('myTrCls').value = argmax(a.probs); myTrDraw();
+}
+function myTrStep(n) { myTr.step = n; myTrDraw(); }
+function myTrPick(id) { if (id === 'myTrF1') myTr.f1 = +$(id).value; else myTr.f2 = +$(id).value; myTrDraw(); }
+function myTrClick(e, cv) { const r = cv.getBoundingClientRect(), s = cv.width; myTr.p[myTr.step] = [Math.min(s - 1, Math.floor((e.clientY - r.top) / r.height * s)), Math.min(s - 1, Math.floor((e.clientX - r.left) / r.width * s))]; myTrDraw(); }
+function myTrDraw() {
+  const net = myLive(), T = myTr, el = $('myTrOut'); if (!net || !T) return;
+  const G = net.topo.G, w = net.w, st = T.step, [y, x] = T.p[st], f = st === 1 || st === 2 ? T.f1 : T.f2, k = +$('myTrCls').value || 0, j = +$('myTrVs').value, cn = state.classes;
+  const sel = (id, n, v, pre) => '<select id="' + id + '" onchange="myTrPick(\'' + id + '\')" style="width:auto">' + Array.from({ length: n }, (_, i) => '<option value="' + i + '"' + (i === v ? ' selected' : '') + '>' + pre + i + '</option>').join('') + '</select>';
+  const cv = id => '<canvas id="' + id + '" style="width:min(300px,86vw);image-rendering:pixelated;cursor:crosshair;border:1px solid var(--line)" onclick="myTrClick(event,this)"></canvas>';
+  let h = '<div class="tabs">' + myTrNames.map((n, i) => '<button class="tabbtn' + (i === st ? ' on' : '') + '" onclick="myTrStep(' + i + ')">' + n + '</button>').join('') + '</div>', paint = () => {};
+  h += '<p>' + esc(pathOf(T.s)) + ', true class <b>' + esc(cn[T.s.cls]) + '</b>, predicted <b>' + esc(cn[argmax(T.probs)]) + ' ' + (100 * Math.max(...T.probs)).toFixed(1) + '%</b>. Click a map cell to inspect it.</p>';
+  if (st === 0) {
+    const o = (y * IN + x) * 3; h += cv('myTrCv') + '<p>Input cell row ' + y + ', col ' + x + ': RGB ' + [0, 1, 2].map(i => Math.round(T.inp[o + i] * 255)).join(', ') + ' (from frame pixel row ' + LUT[y] + ', col ' + LUT[x] + '). Input ' + IN + 'x' + IN + '.</p>';
+    paint = () => myTrPaint('myTrCv', IN, i => [T.inp[i * 3] * 255, T.inp[i * 3 + 1] * 255, T.inp[i * 3 + 2] * 255], [x, y, 1, 1]);
+  } else if (st === 1) {
+    const n = C1O * C1O, g = myTrGray(T.c1o, f * n, n), rows = []; let s = 0;
+    for (let ky = 0; ky < 3; ky++) for (let kx = 0; kx < 3; kx++) {
+      const ip = ((y + ky) * IN + x + kx) * 3, wp = f * 27 + ky * 9 + kx * 3; let t = 0;
+      for (let c = 0; c < 3; c++) t += T.inp[ip + c] * w.c1w[wp + c]; s += t;
+      rows.push(['(' + ky + ',' + kx + ')', [0, 1, 2].map(c => T.inp[ip + c].toFixed(3) + ' x ' + w.c1w[wp + c].toFixed(3)).join(' | '), t.toFixed(4)]);
+    }
+    const pre = s + w.c1b[f], out = lrelu(clipv(pre));
+    h += sel('myTrF1', C1F, f, 'conv1 filter ') + ' ' + cv('myTrCv') + '<p>Map ' + C1O + 'x' + C1O + ', range ' + g.lo.toFixed(3) + ' to ' + g.hi.toFixed(3) + ' (grey: dark low, bright high). Cell (' + y + ',' + x + ') = ' + out.toFixed(4) + '.</p>';
+    h += '<details open><summary>Arithmetic for this cell (input R | G | B x weight R | G | B)</summary>' + myTbl(['kernel (ky,kx)', 'input x weight', 'sum'], rows) + '<p>Sum ' + s.toFixed(4) + ' + bias ' + w.c1b[f].toFixed(4) + ' = ' + pre.toFixed(4) + '. Clip to +-100, then leaky ReLU (x if x&gt;0 else 0.1x) = <b>' + out.toFixed(4) + '</b>. Stored map value ' + T.c1o[f * n + y * C1O + x].toFixed(4) + '.</p></details>';
+    paint = () => myTrPaint('myTrCv', C1O, g.fn, [x, y, 1, 1]);
+  } else if (st === 2) {
+    const n = P1O * P1O, g = myTrGray(T.p1o, f * n, n), c = [[0, 0], [0, 1], [1, 0], [1, 1]].map(([a, b]) => T.c1o[f * C1O * C1O + (2 * y + a) * C1O + 2 * x + b]);
+    h += sel('myTrF1', C1F, f, 'conv1 filter ') + ' ' + cv('myTrCv') + '<p>Pooled map ' + P1O + 'x' + P1O + '. Cell (' + y + ',' + x + ') = max of conv1 cells ' + c.map(v => v.toFixed(3)).join(', ') + ' = <b>' + Math.max(...c).toFixed(3) + '</b> (conv1 rows ' + 2 * y + '-' + (2 * y + 1) + ', cols ' + 2 * x + '-' + (2 * x + 1) + ').</p>';
+    paint = () => myTrPaint('myTrCv', P1O, g.fn, [x, y, 1, 1]);
+  } else if (st === 3) {
+    const n = C2O * C2O, g = myTrGray(T.c2o, f * n, n), rows = []; let s = 0;
+    for (let c = 0; c < C1F; c++) {
+      const e = f * C1F + c, ge = net.ge[e]; let part = 0;
+      if (ge !== 0) for (let ky = 0; ky < 3; ky++) for (let kx = 0; kx < 3; kx++) part += ge * T.p1o[c * P1O * P1O + (y + ky) * P1O + x + kx] * w.c2w[f * 9 * C1F + c * 9 + ky * 3 + kx];
+      s += part; rows.push(['c1&middot;' + c + ' (I' + myIsl1(c, G) + ')', myEdgeStatus(net, e), ge === 0 ? 'off (exactly 0)' : part.toFixed(4)]);
+    }
+    const pre = s + w.c2b[f], out = lrelu(clipv(pre));
+    h += sel('myTrF2', C2F, f, 'conv2 filter ') + ' (island ' + myIsl2(f, G) + ') ' + cv('myTrCv') + '<p>Map ' + C2O + 'x' + C2O + '. Cell (' + y + ',' + x + ') sees model-input rows ' + 2 * y + '-' + (2 * y + 7) + ', cols ' + 2 * x + '-' + (2 * x + 7) + ' (frame pixels ' + LUT[2 * y] + ' to ' + LUT[2 * y + 7] + ' vertically). The map is stretched over the image in the heatmaps, so it is not a pixel-level explanation.</p>';
+    h += '<details open><summary>Arithmetic for this cell</summary>' + myTbl(['source channel', 'edge status', '3x3 partial sum'], rows) + '<p>Sum ' + s.toFixed(4) + ' + bias ' + w.c2b[f].toFixed(4) + ' = ' + pre.toFixed(4) + ', leaky ReLU = <b>' + out.toFixed(4) + '</b>. Stored value ' + T.c2o[f * n + y * C2O + x].toFixed(4) + '.</p></details>';
+    paint = () => myTrPaint('myTrCv', C2O, g.fn, [x, y, 1, 1]);
+  } else if (st === 4) {
+    const n = C2O * C2O; h += '<p>Flattened vector: ' + C2F + ' filters x ' + C2O + ' x ' + C2O + ' = <b>' + FLAT + '</b> numbers, ordered filter, then row, then column (index = f*' + n + ' + row*' + C2O + ' + col). Classifier weights per class: ' + FLAT + '.</p>';
+    h += myTbl(['conv2 filter', 'island', 'first index', 'mean', 'max'], Array.from({ length: C2F }, (_, q) => { let s = 0, m = -Infinity; for (let i = 0; i < n; i++) { s += T.c2o[q * n + i]; m = Math.max(m, T.c2o[q * n + i]); } return [q, 'I' + myIsl2(q, G), q * n, (s / n).toFixed(3), m.toFixed(3)]; }));
+  } else {
+    const n = C2O * C2O, con = new Float32Array(FLAT), sf = new Float64Array(C2F); let m = 1e-9, tot = (j >= 0 ? w.ob[k] - w.ob[j] : w.ob[k]);
+    for (let i = 0; i < FLAT; i++) { con[i] = T.c2o[i] * (w.ow[k * FLAT + i] - (j >= 0 ? w.ow[j * FLAT + i] : 0)); m = Math.max(m, Math.abs(con[i])); sf[Math.floor(i / n)] += con[i]; }
+    for (let q = 0; q < C2F; q++) tot += sf[q];
+    const L = T.logits[k] - (j >= 0 ? T.logits[j] : 0), what = j >= 0 ? 'logit(' + esc(cn[k]) + ') minus logit(' + esc(cn[j]) + ')' : 'logit of ' + esc(cn[k]), ms = Math.max(1e-9, ...Array.from(sf).map(Math.abs));
+    const i0 = f * n + y * C2O + x;
+    h += '<p><b>Signed contribution to ' + what + '.</b> Orange raises it, blue lowers it, dark is zero; full colour = +-' + m.toFixed(3) + ' (one scale for every filter). Colours are relative to this class choice only: a feature that lowers one class can raise another.</p>';
+    h += sel('myTrF2', C2F, f, 'conv2 filter ') + '<div class="row"><div>Activation (grey)<br>' + cv('myTrCv') + '</div><div>Contribution (orange / blue)<br>' + cv('myTrCv2') + '</div></div>';
+    h += '<p>Cell (' + y + ',' + x + '): feature ' + T.c2o[i0].toFixed(4) + ' x weight ' + (w.ow[k * FLAT + i0] - (j >= 0 ? w.ow[j * FLAT + i0] : 0)).toFixed(4) + ' = <b>' + con[i0].toFixed(4) + '</b>.</p>';
+    h += myTbl(['conv2 filter', 'island', 'mean activation', 'sum of contributions', ''], Array.from({ length: C2F }, (_, q) => { let s = 0; for (let i = 0; i < n; i++) s += T.c2o[q * n + i]; return [q, 'I' + myIsl2(q, G), (s / n).toFixed(3), sf[q].toFixed(3), '<div class="bar" style="width:140px"><i style="width:' + (100 * Math.abs(sf[q]) / ms) + '%;background:' + (sf[q] >= 0 ? '#e98c28' : '#4682e6') + '"></i></div>']; }));
+    h += '<p>Sum of contributions + bias = <b>' + tot.toFixed(4) + '</b>. Stored ' + what + ' = ' + L.toFixed(4) + (Math.abs(tot - L) > 1e-3 ? ' <span class="warn">(differs: a logit was clipped at +-50)</span>' : ' (matches)') + '.</p>' + barsHtml(T.probs);
+    paint = () => { const g = myTrGray(T.c2o, f * n, n); myTrPaint('myTrCv', C2O, g.fn, [x, y, 1, 1]); myTrPaint('myTrCv2', C2O, i => myTrDiv(con[f * n + i], m), [x, y, 1, 1]); };
+  }
+  h += '<p class="note">' + myTrDoc[st] + '</p><h3>Intervention evidence (zero-ablation, one part at a time)</h3><div class="row"><button class="primary" onclick="myTrEvidence()">Measure for class ' + esc(cn[k]) + '</button></div><div id="myTrEv">' + T.ev + '</div>';
+  el.innerHTML = h; paint();
+}
+async function myTrEvidence() {
+  const net = myLive(), T = myTr; if (!net || !T) return;
+  const k = +$('myTrCls').value || 0, val = currentSplit().val, buf = new Float32Array(IN * IN * 3), G = net.topo.G, ev = $('myTrEv'), items = [];
+  await myNeedPx(val, 'myTrEv'); const base = val.length ? myMeasure(net, val, buf) : null;
+  for (let c = 0; c < C1F; c++) items.push(['conv1 channel ' + c, { c1: [c], c2: [], e: [] }]);
+  for (let q = 0; q < C2F; q++) items.push(['conv2 filter ' + q, { c1: [], c2: [q], e: [] }]);
+  for (let i = 0; i < G; i++) items.push(['island ' + i, myIslandSpec(i, G)]);
+  const br = []; for (let e = 0; e < net.edge.length; e++) { const f = Math.floor(e / C1F), c = e % C1F; if (net.edge[e] > 0 && myIsl1(c, G) !== myIsl2(f, G)) br.push(['connection c1&middot;' + c + '&rarr;c2&middot;' + f + ' (' + myEdgeStatus(net, e) + ')', { c1: [], c2: [], e: [e] }]); }
+  const useBr = br.length <= 64; if (useBr) br.forEach(b => items.push(b));
+  const rows = []; let n = 0;
+  for (const [nm, sp] of items) {
+    ev.textContent = 'Measuring ' + (++n) + ' / ' + items.length + ' ...';
+    const one = myWithAbl(net, sp, () => { forward(net, T.inp); return [net.a.logits[k], net.a.probs[k]]; }), m = base ? myWithAbl(net, sp, () => myMeasure(net, val, buf)) : null;
+    rows.push({ nm, dl: one[0] - T.logits[k], dp: one[1] - T.probs[k], da: m ? m.acc - base.acc : null, dls: m ? m.loss - base.loss : null }); await tick();
+  }
+  forward(net, T.inp); rows.sort((a, b) => (b.dls == null ? 0 : b.dls) - (a.dls == null ? 0 : a.dls));
+  const sg = (v, d) => v == null ? 'n/a' : (v >= 0 ? '+' : '') + v.toFixed(d);
+  T.evRows = rows.map(r => ({ part: r.nm.replace(/&[a-z]+;/g, '-'), dLogitThisImage: r.dl, dProbThisImage: r.dp, dValAccuracy: r.da, dValLoss: r.dls }));
+  T.ev = '<p><b>This image</b> (class ' + esc(state.classes[k]) + ') and <b>' + val.length + ' validation images</b> (test images are never used here). Baseline on validation: accuracy ' + (base ? myPct(base.acc) : 'n/a') + ', loss ' + (base ? myNum(base.loss) : 'n/a') + '. Sorted by validation loss increase.</p>' +
+    myTbl(['Switched off', 'change in logit (this image)', 'change in probability (this image)', 'change in val accuracy', 'change in val loss'], rows.map(r => [r.nm, sg(r.dl, 3), sg(r.dp, 3), r.da == null ? 'n/a' : sg(100 * r.da, 1) + ' pts', sg(r.dls, 3)])) +
+    '<p class="note">' + (useBr ? '' : 'Connections are not listed (' + br.length + ' of them, use the Ablation tab). ') + 'For a conv2 filter the logit change equals minus its summed contribution in step 6, because that filter feeds the classifier directly. For conv1 channels, islands and connections no such identity holds (the layers after them are nonlinear), so only this measurement tells. One image and a small validation set are weak evidence, and ablation shows what the model uses, not what a filter means.</p>';
+  ev.innerHTML = T.ev;
+}
+function myTrSaveNote() {
+  const n = myLive(), r = n && myRuns[n.topo.type];
+  myDl('trace-notes-' + layoutKey() + '.json', JSON.stringify({ page: 'island-cnn ' + VERSION, model: n ? myDesc(n.topo) : null, layout: layoutKey(), seed: r ? r.seed : null, image: myTr ? pathOf(myTr.s) : null, step: myTr ? myTrNames[myTr.step] : null, explainedClass: state.classes[+$('myTrCls').value] || null, question: $('myTrQ').value, observation: $('myTrNote').value, evidence: myTr ? myTr.evRows : null }, null, 2));
 }
 // ---------- Graph statistics ----------
 async function myRenderStats(timeIt) {
