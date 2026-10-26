@@ -26,13 +26,15 @@
         contribution of each conv2 feature to a class score (or to the gap between two classes), and an intervention table (zero-ablation: change in logit on this image,
         change in validation accuracy and loss). Reads the model only: forward pass, backward pass, myWeights.bin and config format are unchanged.
   v008: the class bar chart under the Model Graph buttons now follows the live webcam (it was left on the last "Send one image through" result). Nothing else changed.
+  v009: Model F (spatial islands, browser only, firmware cannot run it) and a controlled F experiment on the Compare tab; the model just trained or made becomes the Default
+        Device Model; live webcam buttons are green (running) and red (stopped). Models A to E: forward and backward pass bit-identical to v008 (tested).
   Three.js r128 is loaded from cdnjs for the 3D view only. Without it (offline) the page works and shows the 2D schematic. MIT license. Use at your own risk.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Island-CNN, Vision CNN SD trainer v008 (Trace &amp; Explain)</title>
+<title>Island-CNN, Vision CNN SD trainer v008 (Trace &amp; Explain, Model F)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 :root{--bg:#11151b;--panel:#182029;--panel2:#1f2a36;--line:#2c3947;--text:#dde5ee;--mut:#8b9aac;--acc:#66d1bd;--acc-ink:#062a24;--bad:#ef6b73;--warn:#e9b44c;--ok:#7bd88f;--r:8px}
@@ -126,11 +128,12 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 #my3dTip{position:absolute;display:none;pointer-events:none;padding:2px 8px;background:rgba(15,19,25,.92);border:1px solid var(--line);border-radius:4px;font-size:12px;white-space:nowrap}
 @media (max-width:700px){#my3dBox{height:380px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.liveOn{background:#1f6f43!important;border-color:#7bd88f!important;color:#fff!important;font-weight:600}.liveOff{background:#7a2530!important;border-color:var(--bad)!important;color:#fff!important;font-weight:600}
 </style>
 </head>
 <body>
 <header>
-  <h1>Vision CNN SD trainer<span class="ver">v008 Trace &amp; Explain</span></h1>
+  <h1>Vision CNN SD trainer<span class="ver">v009 Model F, auto default</span></h1>
   <p>Browser companion for the XIAO ESP32-S3 FULL VISION ML firmware (firmware-v007; firmware-v005 and later also give config.json class names and debug frames): load the SD card, add images, review and clean them, train the same CNN, then write myWeights.bin back to the card.</p>
   <p>Everything runs in this page. Images and weights never leave your computer.</p>
 </header>
@@ -142,6 +145,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
     <p><b>The question.</b> How many conv1 to conv2 connections does a vision task really need, which ones, and can a person and a machine agree on the answer well enough to act on it?</p>
     <p><b>What this page does not claim.</b> It does not claim that islands train a better model than the normal CNN. Model A can represent everything the others can (set some weights to zero and you have them), so at equal width A cannot lose on capacity. Any difference comes from optimisation, generalisation and cost, and those are what the page measures.</p>
     <p><b>The five models.</b> A: every connection. B: islands only. C: islands plus K fixed bridges. D: islands plus K bridges chosen by learned gates. E: A trained first, then its weakest connections pruned by kernel size down to the same count as D, then fine-tuned. E is the honest baseline: if D does not beat E at the same number of connections, the island idea adds nothing over ordinary pruning.</p>
+    <p><b>Model F (spatial islands).</b> A separate research model, not a replacement for A to E. It cuts the conv2 map into regions instead of cutting channels, and tests whether the boundary rule (hard or overlapping) matters. It changes the forward pass, so the firmware cannot run it and it is never exported to the device.</p>
     <p><b>Is fewer connections faster on the microcontroller?</b> Only if the firmware skips them. Zeros in a dense loop cost the same as live weights. With a skip list, conv2 time should fall roughly with the active connection count, but conv1 and the classifier do not shrink, so the whole model speeds up by less. The page predicts the speedup from multiply-accumulates; type your measured milliseconds into the Compare table to check the prediction. Peak memory depends on the order the firmware computes things in; the table gives one estimate, for an island-by-island schedule.</p>
     <p><b>How to read the evidence.</b> Validation images are for looking and choosing. Test images are held apart: no training, no bridge selection, no coach, no ablation touches them. Each stored model is scored on them once, and the page counts how many looks the test set has had. One seed is an anecdote, so use Repeat and the K sweep. Ablation shows what a model uses, not what a filter means.</p>
     <p><b>Limits.</b> Only the conv1 to conv2 channel connections are constrained, on a small network. Nothing here shows the same result for a larger CNN. The coach's evidence (zero-ablation, gate scores) is close to ordinary pruning criteria, so compare it with E before claiming it adds anything.</p>
@@ -243,13 +247,16 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
   <p class="note">These are compile-time settings in the sketch (INPUT_SIZE, CONV1_FILTERS, CONV2_FILTERS). Copy the lines from section 2 into the sketch after changing them. The 3x3 kernel is fixed in the firmware loops. Images on the card stay 240x240, so changing the size needs no new photos, only a retrain. The size must be even because of the 2x2 max pool. Cost grows with the square of the input size, in the browser and on the device.</p>
   <h3>Connectivity (graph-theory model type)</h3>
   <div class="grid">
-    <label>Model type<select id="myType"><option value="E" disabled>E  Pruned dense (made on the Compare tab)</option><option value="A">A  Normal CNN (all connections)</option><option value="B">B  Isolated islands</option><option value="C">C  Designed archipelago (fixed bridges)</option><option value="D">D  Learned archipelago (learned bridges)</option></select></label>
+    <label>Model type<select id="myType"><option value="E" disabled>E  Pruned dense (made on the Compare tab)</option><option value="A">A  Normal CNN (all connections)</option><option value="B">B  Isolated islands</option><option value="C">C  Designed archipelago (fixed bridges)</option><option value="D">D  Learned archipelago (learned bridges)</option><option value="F">F  Spatial islands (browser only)</option></select></label>
     <label>Islands (groups)<input type="number" id="myG" value="2" min="2" max="16" step="1"></label>
     <label>Bridge budget K (C and D)<input type="number" id="myK" value="4" min="0" step="1"></label>
     <label>Random seed (blank = new each run)<input type="number" id="mySeed" placeholder="auto" min="1" step="1"></label>
     <label>D: sparsity penalty<input type="number" id="myLam" value="0.05" step="0.01" min="0"></label>
     <label>D: gate learning rate<input type="number" id="myGateLr" value="0.05" step="0.01" min="0.001"></label>
     <label>D: fine-tune epochs after selection<input type="number" id="myFt" value="10" min="0" step="1"></label>
+    <label>F: regions per side (S x S)<input type="number" id="myFS" value="2" min="2" max="4" step="1"></label>
+    <label>F: boundary rule<select id="myFMode"><option value="hard">hard (no overlap)</option><option value="linear">linear overlap</option><option value="gauss">gaussian overlap</option></select></label>
+    <label>F: overlap margin (cells)<input type="number" id="myFO" value="1" min="0" max="4" step="1"></label>
   </div>
   <div class="info" id="myTopoInfo" style="margin-top:10px"></div>
   <p class="note">Only the conv1 to conv2 channel connections are constrained. Conv1 reads the RGB image and the classifier reads every conv2 filter, so island separation holds through the two conv layers only. A "bridge" is one cross-island conv1 channel to conv2 filter connection (one 3x3 kernel = 9 scalar weights). Model D trains gates on all candidate bridges, keeps the top K by gate score, freezes that topology and fine-tunes. Changing the type never reinterprets weights already in memory: the next Train starts fresh.</p>
@@ -319,7 +326,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
     </div>
     <div class="row">
       <select id="myFlowCls" aria-label="Class"></select><input type="number" id="myFlowIdx" value="1" min="1" style="width:90px" aria-label="Image number in that class">
-      <button class="primary" onclick="my3dFlowOne()">Send one image through</button><button onclick="toggleLive()">Start / stop live webcam</button>
+      <button class="primary" onclick="my3dFlowOne()">Send one image through</button><button id="myLiveBtn2" class="liveOff" onclick="toggleLive()">Live webcam: stopped (press to start)</button>
     </div>
     <div id="myFlowOut"></div>
     <div class="note" id="my3dMsg"></div>
@@ -366,6 +373,11 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
       <div class="row"><label class="chk"><input type="checkbox" id="mySweepE" checked> Also make E for every D</label><button class="primary" onclick="myRunSweep()">Run sweep</button><button onclick="myDlSweep()">Save sweep.json</button></div>
       <p class="note">Uses the settings of section 3 and the islands box of section 3. Trains A once per seed, then C and D at every K, and E from A at D's edge count. Pick K from these validation numbers, then score the one model you chose on the test set. The stored slots keep the last K trained; the results stay in the chart below and in sweep.json. K = 0 is the isolated-islands model B.</p>
       <div id="myKSweepOut"></div>
+    </details>
+    <details><summary>Spatial islands experiment (Model F): hard boundary against overlap, with A as the baseline</summary>
+      <div class="row"><label class="chk" style="gap:6px">Seeds <input type="number" id="myFExpN" value="3" min="1" max="5" style="width:70px" aria-label="Seeds"></label><button class="primary" onclick="myRunFExp()">Run F experiment</button><button class="danger" onclick="state.stop = true">STOP</button></div>
+      <p class="note">Trains A, F with a hard boundary, F with a 1-cell linear overlap and F with a 2-cell gaussian overlap on the same split, seeds and settings, using the regions-per-side box in section 3. Model F changes the forward pass and is browser only. Validation numbers only.</p>
+      <div id="myFExpOut"></div>
     </details>
     <div id="myStoreBox"></div>
     <div id="myCmp"></div>
@@ -453,7 +465,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 <section id="s-infer">
   <h2>6 Infer (live)</h2>
   <div class="row">
-    <button id="btnLive" class="primary">Start live</button>
+    <button id="btnLive" class="liveOff">Start live</button>
     <select class="heatAgg" aria-label="Heatmap aggregation"><option value="max">Heatmap: max over filters</option><option value="mean">Heatmap: mean over filters</option></select>
     <label class="chk"><input type="checkbox" class="heatOverlay" checked> Overlay heatmap on image</label>
   </div>
@@ -562,7 +574,7 @@ table.sim td{text-align:center;padding:2px 4px;min-width:34px;font-size:12px}
 
 <script>
 'use strict';
-const VERSION = 'v008';
+const VERSION = 'v009';
 
 /* ==CORE START== (no DOM use below this line until CORE END) */
 
@@ -646,15 +658,17 @@ function forward(net, inp, mask) {
     }
   }
   if (AB) for (let f = 0; f < C1F; f++) if (AB.c1[f]) p1o.fill(0, f * P1O * P1O, (f + 1) * P1O * P1O);
+  const SP = net.sp;
   for (let f = 0; f < C2F; f++) {
-    const o = f * C2O * C2O, b = w.c2b[f];
+    const o = f * C2O * C2O, b = w.c2b[f], rf = SP ? f % SP.R : 0, mo = rf * P1O * P1O;
     for (let y = 0; y < C2O; y++) for (let xx = 0; xx < C2O; xx++) {
+      if (SP && SP.reg2[y * C2O + xx] !== rf) { c2o[o + y * C2O + xx] = 0; continue; }
       let s = 0;
       for (let c = 0; c < C1F; c++) {
         const ge = GE[f * C1F + c]; if (ge === 0) continue;   // edge off: no connection
         const ib = c * P1O * P1O;
         for (let ky = 0; ky < 3; ky++) for (let kx = 0; kx < 3; kx++)
-          s += ge * p1o[ib + (y + ky) * P1O + (xx + kx)] * w.c2w[f * 9 * C1F + c * 9 + ky * 3 + kx];
+          s += ge * (SP ? p1o[ib + (y + ky) * P1O + (xx + kx)] * SP.m[mo + (y + ky) * P1O + (xx + kx)] : p1o[ib + (y + ky) * P1O + (xx + kx)]) * w.c2w[f * 9 * C1F + c * 9 + ky * 3 + kx];
       }
       c2o[o + y * C2O + xx] = lrelu(clipv(s + b));
     }
@@ -686,16 +700,19 @@ function backward(net, inp, label, mask) {
   const c1o = a.c1o, p1o = a.p1o, c2o = a.c2o, c2g = a.c2g, p1g = a.p1g, c1g = a.c1g;
   for (let i = 0; i < FLAT; i++) c2g[i] = dg[i] * lrd(c2o[i]);
   p1g.fill(0);
+  const SP = net.sp;
   for (let f = 0; f < C2F; f++) {
-    const o = f * C2O * C2O;
+    const o = f * C2O * C2O, rf = SP ? f % SP.R : 0, mo = rf * P1O * P1O;
     for (let y = 0; y < C2O; y++) for (let xx = 0; xx < C2O; xx++) {
+      if (SP && SP.reg2[y * C2O + xx] !== rf) continue;
       const gr = c2g[o + y * C2O + xx]; g.c2b[f] += gr;
       for (let c = 0; c < C1F; c++) {
         const eid = f * C1F + c, ge = net.ge[eid]; if (ge === 0) continue;
         const ib = c * P1O * P1O; let gsum = 0;
         for (let ky = 0; ky < 3; ky++) for (let kx = 0; kx < 3; kx++) {
           const pi = ib + (y + ky) * P1O + (xx + kx), wi = f * 9 * C1F + c * 9 + ky * 3 + kx;
-          g.c2w[wi] += gr * ge * p1o[pi]; p1g[pi] += gr * ge * w.c2w[wi]; gsum += gr * p1o[pi] * w.c2w[wi];
+          const mm = SP ? SP.m[mo + (y + ky) * P1O + (xx + kx)] : 1;
+          g.c2w[wi] += gr * ge * (p1o[pi] * mm); p1g[pi] += gr * ge * w.c2w[wi] * mm; gsum += gr * (p1o[pi] * mm) * w.c2w[wi];
         }
         if (net.edge[eid] === 3) net.gg[eid] += gsum;
       }
@@ -928,20 +945,27 @@ function mySetSeed(s) {   // mulberry32. A seed of 0 or less means "not seeded" 
   let a = s >>> 0;
   rnd = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
-const MY_TYPES = { A: 'Normal CNN', B: 'Isolated islands', C: 'Designed archipelago', D: 'Learned archipelago', E: 'Pruned dense (weight size)' };
-const MY_TYPE_JSON = { A: 'normal', B: 'isolatedIslands', C: 'designedArchipelago', D: 'learnedArchipelago', E: 'prunedDense' };
+const MY_TYPES = { A: 'Normal CNN', B: 'Isolated islands', C: 'Designed archipelago', D: 'Learned archipelago', E: 'Pruned dense (weight size)', F: 'Spatial islands' };
+const MY_TYPE_JSON = { A: 'normal', B: 'isolatedIslands', C: 'designedArchipelago', D: 'learnedArchipelago', E: 'prunedDense', F: 'spatialIslands' };
 const myIsl1 = (c, G) => Math.min(G - 1, Math.floor(c * G / C1F));   // island of conv1 channel c
 const myIsl2 = (f, G) => Math.min(G - 1, Math.floor(f * G / C2F));   // island of conv2 filter f
 function myCandidates(G) { const o = []; for (let f = 0; f < C2F; f++) for (let c = 0; c < C1F; c++) if (myIsl2(f, G) !== myIsl1(c, G)) o.push([f, c]); return o; }
 // Designed bridges: K evenly spaced picks from the cross-island list ordered by (dst filter, src channel). Deterministic.
 function myDesigned(G, K) { const cd = myCandidates(G), M = cd.length, o = []; for (let i = 0; i < K; i++) o.push(cd[Math.floor((i + 0.5) * M / K)]); return o; }
-function myDefaultTopo() { return { type: 'A', G: 2, K: 4, lam: 0.05, gateLr: 0.05, ft: 10, seed: 0, stage: 'final', sel: [], candScores: null, hist: null }; }
+function myDefaultTopo() { return { S: 2, sm: 'hard', so: 1, type: 'A', G: 2, K: 4, lam: 0.05, gateLr: 0.05, ft: 10, seed: 0, stage: 'final', sel: [], candScores: null, hist: null }; }
 function myTopoCheck(t) {
   if (!MY_TYPES[t.type]) return 'Unknown model type.';
   const mx = Math.min(C1F, C2F);
   if (!Number.isInteger(t.G) || t.G < 2 || t.G > mx) return 'Islands must be a whole number from 2 to ' + mx + ' (the smaller of the two filter counts).';
   if (t.type === 'C' || t.type === 'D') { const M = myCandidates(t.G).length; if (!Number.isInteger(t.K) || t.K < 0 || t.K > M) return 'Bridge budget K must be a whole number from 0 to ' + M + ' (the number of cross-island channel connections).'; }
   if (t.type === 'E' && (!Number.isInteger(t.K) || t.K < 1 || t.K > C1F * C2F)) return 'Kept edge count must be a whole number from 1 to ' + C1F * C2F + '.';
+  if (t.type === 'F') {
+    if (!Number.isInteger(t.S) || t.S < 2 || t.S > 4) return 'Regions per side must be a whole number from 2 to 4.';
+    if (C2F < t.S * t.S) return 'Each region needs a filter: conv2 filters (' + C2F + ') must be at least ' + t.S * t.S + '.';
+    if (P1O < 2 * t.S) return 'The pooled map (' + P1O + 'x' + P1O + ') is too small for ' + t.S + 'x' + t.S + ' regions.';
+    if (!['hard', 'linear', 'gauss'].includes(t.sm)) return 'Unknown boundary rule.';
+    if (!Number.isInteger(t.so) || t.so < 0 || t.so > 4) return 'Overlap margin must be a whole number from 0 to 4.';
+  }
   if (t.type === 'D') {
     if (!(t.lam >= 0)) return 'Sparsity penalty must be 0 or more.';
     if (!(t.gateLr > 0)) return 'Gate learning rate must be above 0.';
@@ -953,7 +977,7 @@ function myEdges(t) {
   const E = new Uint8Array(C1F * C2F);
   for (let f = 0; f < C2F; f++) for (let c = 0; c < C1F; c++) {
     const within = myIsl2(f, t.G) === myIsl1(c, t.G);
-    E[f * C1F + c] = t.type === 'A' ? 1 : (t.type === 'E' ? 0 : (within ? 1 : (t.type === 'D' && t.stage === 'gating' ? 3 : 0)));
+    E[f * C1F + c] = (t.type === 'A' || t.type === 'F') ? 1 : (t.type === 'E' ? 0 : (within ? 1 : (t.type === 'D' && t.stage === 'gating' ? 3 : 0)));
   }
   if (t.type === 'C') for (const [f, c] of myDesigned(t.G, t.K)) E[f * C1F + c] = 2;
   if ((t.type === 'D' || t.type === 'E') && t.stage === 'final') for (const [f, c] of t.sel) E[f * C1F + c] = 2;
@@ -974,7 +998,7 @@ function myRefreshGates(net) {
 }
 function myInstallTopo(net, t) {   // for a freshly made (or freshly randomised) net only: this ZEROES forbidden weights
   net.topo = Object.assign(myDefaultTopo(), t, { sel: (t.sel || []).map(x => x.slice()) });
-  net.edge = myEdges(net.topo); net.gs.fill(0); net.gm.fill(0); net.gv.fill(0);
+  net.edge = myEdges(net.topo); net.sp = myBuildSp(net.topo); net.gs.fill(0); net.gm.fill(0); net.gv.fill(0);
   myEnforceMask(net); myRefreshGates(net);
 }
 function myPostUpdate(net, step) {   // called after every Adam step
@@ -1005,14 +1029,14 @@ function mySelectTopK(net) {
   for (const k of PARAM_ORDER) { net.m[k].fill(0); net.v[k].fill(0); }
   myEnforceMask(net); myRefreshGates(net);
 }
-function myTopoSame(a, b) { return a && b && a.type === b.type && a.G === b.G && (a.type === 'A' || a.type === 'B' || a.K === b.K) && a.stage === 'final'; }
-const myDesc = t => t.type + ' ' + MY_TYPES[t.type] + (t.type === 'A' || t.type === 'E' ? '' : ', ' + t.G + ' islands') + (t.type === 'C' || t.type === 'D' ? ', budget ' + t.K : '') + (t.type === 'E' ? ', ' + t.K + ' of ' + C1F * C2F + ' edges kept' : '');
+function myTopoSame(a, b) { return a && b && a.type === b.type && a.G === b.G && (a.type === 'A' || a.type === 'B' || a.K === b.K) && a.stage === 'final' && (a.type !== 'F' || (a.S === b.S && a.sm === b.sm && a.so === b.so)); }
+const myDesc = t => t.type === 'F' ? 'F Spatial islands, ' + t.S + 'x' + t.S + ' regions, ' + (t.sm === 'hard' ? 'hard boundary' : t.sm + ' overlap ' + t.so) : t.type + ' ' + MY_TYPES[t.type] + (t.type === 'A' || t.type === 'E' ? '' : ', ' + t.G + ' islands') + (t.type === 'C' || t.type === 'D' ? ', budget ' + t.K : '') + (t.type === 'E' ? ', ' + t.K + ' of ' + C1F * C2F + ' edges kept' : '');
 function myEdgeStatus(net, e) {
   const f = Math.floor(e / C1F), c = e % C1F, G = net.topo.G, cross = myIsl1(c, G) !== myIsl2(f, G), k = net.edge[e], t = net.topo.type;
   if (t === 'E') return k === 0 ? 'pruned' : 'kept after pruning';
   if (k === 3) return 'candidate (gated)';
   if (k === 2) return t === 'C' ? 'fixed bridge' : 'selected bridge';
-  if (k === 1) return t === 'A' ? (cross ? 'dense (crosses islands)' : 'dense (within island)') : 'within island';
+  if (k === 1) return (t === 'A' || t === 'F') ? (cross ? 'dense (crosses islands)' : 'dense (within island)') : 'within island';
   return t === 'D' && cross ? 'unselected candidate' : (cross ? 'not allowed' : 'off');
 }
 function myCounts(net) {
@@ -1020,7 +1044,7 @@ function myCounts(net) {
   for (let e = 0; e < net.edge.length; e++) if (net.edge[e] > 0) { on++; const f = Math.floor(e / C1F), c = e % C1F; if (myIsl1(c, G) !== myIsl2(f, G)) cross++; else within++; }
   const w = net.w; for (const k of PARAM_ORDER) for (let i = 0; i < w[k].length; i++) if (w[k][i] !== 0) nz++;
   let res = 0; for (let i = 0; i < G; i++) { let n = 0; for (let c = 0; c < C1F; c++) { let used = false; for (let f = 0; f < C2F; f++) if (myIsl2(f, G) === i && net.edge[f * C1F + c] > 0) used = true; if (used) n++; } res = Math.max(res, n); }
-  const m1 = C1O * C1O * 27 * C1F, m2 = C2O * C2O * 9 * on, m3 = FLAT * N;
+  const m1 = C1O * C1O * 27 * C1F, m2 = net.sp ? myOwnedMacs(net) : C2O * C2O * 9 * on, m3 = FLAT * N;
   return { on, possible: C1F * C2F, cross, within, stored: totalFloats(N), active: C1W + C1F + 9 * on + C2F + FLAT * N + N, nonzero: nz, macs: m1 + m2 + m3, resident: res * P1O * P1O, residentDense: C1F * P1O * P1O, macsDense: m1 + C2O * C2O * 9 * C1F * C2F + m3 };
 }
 // ---- structural graph measures (channel-level, directed, layered: input -> conv1 -> conv2 -> classes) ----
@@ -1126,12 +1150,13 @@ function myConfigObj(net, classes, extra) {
   return Object.assign({
     configVersion: 1, page: 'vision-cnn-sd-trainer ' + VERSION, modelType: MY_TYPE_JSON[t.type],
     architecture: { inputWidth: IN, inputHeight: IN, inputChannels: 3, conv1Filters: C1F, conv2Filters: C2F, kernel: 3, pool: 'max2x2', activation: 'leakyReLU0.1', classCount: classes.length, classes: classes.slice() },
-    connectivity: { mode: { A: 'dense', B: 'isolatedIslands', C: 'designedBridges', D: 'learnedBridges', E: 'prunedDense' }[t.type], layer: 'conv1->conv2 channel connections, edge index = dstFilter*conv1Filters+srcChannel',
+    connectivity: { mode: { A: 'dense', B: 'isolatedIslands', C: 'designedBridges', D: 'learnedBridges', E: 'prunedDense', F: 'spatialIslands' }[t.type], layer: 'conv1->conv2 channel connections, edge index = dstFilter*conv1Filters+srcChannel',
       groupCount: G, islandOfConv1: Array.from({ length: C1F }, (_, c) => myIsl1(c, G)), islandOfConv2: Array.from({ length: C2F }, (_, f) => myIsl2(f, G)),
       bridgeBudget: t.type === 'C' || isD ? t.K : 0, candidateBridgeCount: t.type === 'C' || isD ? myCandidates(G).length : 0,
       selectionMethod: t.type === 'C' ? 'designedEvenlySpaced' : (isD ? 'trainGatesThenSelectTopK' : (t.type === 'E' ? 'magnitudePruneFromDenseThenFineTune' : 'none')),
       stage: isD ? (t.stage === 'final' ? 'selected' : 'untrained') : (t.type === 'E' ? 'selected' : 'fixed'), selectedBridges: sel.map(([f, c]) => ({ dst: f, src: c })), edgeMask: myMaskRows(net), keptEdgeCount: t.type === 'E' ? t.K : null, keptEdges: t.type === 'E' ? t.sel.map(([f, c]) => ({ dst: f, src: c })) : [] },
     training: { seed: t.seed || null, sparsityPenalty: isD ? t.lam : null, gateLearningRate: isD ? t.gateLr : null, fineTuneEpochs: isD || t.type === 'E' ? t.ft : null },
+    spatial: t.type === 'F' ? { regionsPerSide: t.S, boundaryRule: t.sm, marginCells: t.so, rule: 'conv2 filter f owns region f mod S*S, zero outside it; pooled input masked per region', firmwareSupport: 'none, needs a firmware change' } : null,
     tuning: { moves: (net.fx ? net.fx.plan : []).map(m => Object.assign({}, m)) }
   }, extra || {});
 }
@@ -1145,9 +1170,9 @@ function myParseConfig(cfg, classes) {
   chk('inputWidth', IN, 'Input width'); chk('inputHeight', IN, 'Input height'); chk('conv1Filters', C1F, 'Conv1 filters'); chk('conv2Filters', C2F, 'Conv2 filters'); chk('classCount', classes.length, 'Class count');
   const type = Object.keys(MY_TYPE_JSON).find(k => MY_TYPE_JSON[k] === cfg.modelType);
   if (!type) { er.push('Unknown modelType "' + cfg.modelType + '".'); return { errors: er }; }
-  const t = Object.assign(myDefaultTopo(), { type, G: cn.groupCount, K: type === 'A' || type === 'B' ? 0 : (type === 'E' ? cn.keptEdgeCount : cn.bridgeBudget) });
+  const t = Object.assign(myDefaultTopo(), { type, G: cn.groupCount, K: type === 'A' || type === 'B' || type === 'F' ? 0 : (type === 'E' ? cn.keptEdgeCount : cn.bridgeBudget) });
   const tr = cfg.training || {}; if (type === 'D') { if (tr.sparsityPenalty != null) t.lam = tr.sparsityPenalty; if (tr.gateLearningRate != null) t.gateLr = tr.gateLearningRate; if (tr.fineTuneEpochs != null) t.ft = tr.fineTuneEpochs; }
-  t.seed = tr.seed || 0;
+  t.seed = tr.seed || 0; if (type === 'F') { const sq = cfg.spatial || {}; t.S = sq.regionsPerSide; t.sm = sq.boundaryRule; t.so = sq.marginCells; }
   const te = myTopoCheck(t); if (te) { er.push(te); return { errors: er }; }
   const sb = Array.isArray(cn.selectedBridges) ? cn.selectedBridges : [], cand = new Set(myCandidates(t.G).map(([f, c]) => f * C1F + c)), seen = new Set(), sel = [];
   for (const b of sb) {
@@ -1182,7 +1207,7 @@ function myImportBundle(b, classes) {   // throws Error with a readable message;
   const u = myUnB64(w.base64); if (u.length !== w.floats * 4) throw new Error('Weight data is ' + u.length + ' bytes, expected ' + w.floats * 4 + '.');
   const net = makeNet(classes.length); parseWeights(net, u.buffer.slice(u.byteOffset, u.byteOffset + u.length));
   if (!weightsFinite(net)) throw new Error('Weights contain NaN or Infinity.');
-  net.topo = r.topo; net.edge = myEdges(r.topo);
+  net.topo = r.topo; net.edge = myEdges(r.topo); net.sp = myBuildSp(net.topo);
   let bad = 0; for (let e = 0; e < net.edge.length; e++) if (net.edge[e] === 0) { const f = Math.floor(e / C1F), c = e % C1F; for (let i = 0; i < 9; i++) if (net.w.c2w[f * 9 * C1F + c * 9 + i] !== 0) bad++; }
   if (bad) throw new Error(bad + ' weights sit on connections the topology turns off. Refusing to load: the weights and the mask disagree.');
   if (b.learnedBridges && Array.isArray(b.learnedBridges.gateScoresAllEdges) && b.learnedBridges.gateScoresAllEdges.length === net.gs.length) net.gs.set(b.learnedBridges.gateScoresAllEdges);
@@ -1809,11 +1834,12 @@ function renderEval() {
 }
 
 // ---------- live inference ----------
+function mySyncLive() { const on = !!state.live; $('btnLive').className = on ? 'liveOn' : 'liveOff'; $('btnLive').textContent = on ? 'Stop live' : 'Start live'; const b = $('myLiveBtn2'); if (b) { b.className = on ? 'liveOn' : 'liveOff'; b.textContent = on ? 'Live webcam: running (press to stop)' : 'Live webcam: stopped (press to start)'; } }
 async function toggleLive() {
-  if (state.live) { state.live = false; $('btnLive').textContent = 'Start live'; return; }
+  if (state.live) { state.live = false; mySyncLive(); return; }
   if (!hasModel()) { log('Live: no model in memory. Train, or load a folder with header/myWeights.bin first.'); $('liveBanner').textContent = 'No model yet'; return; }
   await startCam(); if (!state.stream) return;
-  state.live = true; $('btnLive').textContent = 'Stop live'; liveLoop();
+  state.live = true; mySyncLive(); liveLoop();
 }
 async function liveLoop() {
   const hv = $('liveHeat').getContext('2d');
@@ -1832,6 +1858,7 @@ async function liveLoop() {
     } catch (e) { log('Live error: ' + e.message); state.live = false; $('btnLive').textContent = 'Start live'; break; }
     await sleep(60);
   }
+  mySyncLive();
 }
 
 // ---------- save ----------
@@ -2212,10 +2239,10 @@ function myDl(name, content, type) { const a = document.createElement('a'); a.hr
 function myReadTopo() {
   const t = myDefaultTopo(); t.type = $('myType').value; t.G = parseInt($('myG').value);
   t.K = (t.type === 'C' || t.type === 'D') ? parseInt($('myK').value) : 0;
-  t.lam = parseFloat($('myLam').value); t.gateLr = parseFloat($('myGateLr').value); t.ft = parseInt($('myFt').value);
+  t.S = parseInt($('myFS').value); t.sm = $('myFMode').value; t.so = parseInt($('myFO').value); t.lam = parseFloat($('myLam').value); t.gateLr = parseFloat($('myGateLr').value); t.ft = parseInt($('myFt').value);
   t.stage = t.type === 'D' ? 'gating' : 'final'; return t;
 }
-function myWriteTopo(t) { $('myType').value = t.type; $('myG').value = t.G; if (t.type === 'C' || t.type === 'D') $('myK').value = t.K; if (t.type === 'D') { $('myLam').value = t.lam; $('myGateLr').value = t.gateLr; $('myFt').value = t.ft; } if (t.seed) $('mySeed').value = t.seed; }
+function myWriteTopo(t) { $('myType').value = t.type; if (t.type === 'F') { $('myFS').value = t.S; $('myFMode').value = t.sm; $('myFO').value = t.so; } $('myG').value = t.G; if (t.type === 'C' || t.type === 'D') $('myK').value = t.K; if (t.type === 'D') { $('myLam').value = t.lam; $('myGateLr').value = t.gateLr; $('myFt').value = t.ft; } if (t.seed) $('mySeed').value = t.seed; }
 // The model being looked at: the live net, or (no model yet) a weightless preview of the topology chosen in section 3.
 function myCur() {
   const N = Math.max(2, state.classes.length);
@@ -2232,15 +2259,16 @@ function myModelLine() {
 function myRenderTopoInfo() {
   const t = myReadTopo(), er = myTopoCheck(t), tr = state.training;
   $('myType').disabled = $('myG').disabled = $('mySeed').disabled = tr; $('myK').disabled = tr || !(t.type === 'C' || t.type === 'D');
-  $('myLam').disabled = $('myGateLr').disabled = $('myFt').disabled = tr || t.type !== 'D';
+  $('myLam').disabled = $('myGateLr').disabled = $('myFt').disabled = tr || t.type !== 'D'; $('myFS').disabled = $('myFMode').disabled = $('myFO').disabled = tr || t.type !== 'F';
   let h = '';
   if (er) h += '<div class="bad">' + esc(er) + '</div>';
   else {
     const M = myCandidates(t.G).length; h += '<div>Next Train: <b>' + esc(myDesc(t)) + '</b>. Cross-island channel connections that could be bridges: ' + M + ' of ' + (C1F * C2F) + '.</div>';
+    if (t.type === 'F') h += '<div>' + myFDoc(t) + '</div><div class="row"><div>Region 0 input weight (white = 1)<br><canvas id="myFMask" style="width:180px;image-rendering:pixelated;border:1px solid var(--line)"></canvas></div><div>Owner region of each conv2 cell<br><canvas id="myFReg" style="width:180px;image-rendering:pixelated;border:1px solid var(--line)"></canvas></div></div>';
     if (t.type === 'C') h += '<div>Designed bridges (source conv1 channel to destination conv2 filter): ' + myDesigned(t.G, t.K).map(([f, c]) => 'c1&middot;' + c + '&rarr;c2&middot;' + f).join(', ') + '</div>';
   }
   const n = state.net; if (n && n.N === state.classes.length && hasModel()) h += '<div>In memory: <b>' + esc(myDesc(n.topo)) + '</b>' + (!er && !myTopoSame(n.topo, t) ? '. <span class="warn">Differs from the choice above: the next Train starts fresh, weights are not reinterpreted.</span>' : '.') + '</div>';
-  $('myTopoInfo').innerHTML = h;
+  $('myTopoInfo').innerHTML = h; if (t.type === 'F' && !er) myFPaint(t);
 }
 function myRenderGraphUI() {
   myRenderTopoInfo();
@@ -2556,6 +2584,60 @@ function myTrSaveNote() {
   const n = myLive(), r = n && myRuns[n.topo.type];
   myDl('trace-notes-' + layoutKey() + '.json', JSON.stringify({ page: 'island-cnn ' + VERSION, model: n ? myDesc(n.topo) : null, layout: layoutKey(), seed: r ? r.seed : null, image: myTr ? pathOf(myTr.s) : null, step: myTr ? myTrNames[myTr.step] : null, explainedClass: state.classes[+$('myTrCls').value] || null, question: $('myTrQ').value, observation: $('myTrNote').value, evidence: myTr ? myTr.evRows : null }, null, 2));
 }
+// ======================================================================
+//  v009 MODEL F: SPATIAL ISLANDS (browser-only research model; the firmware cannot run it)
+//  Rule: the conv2 output grid is cut into S x S regions. Conv2 filter f belongs to region f mod (S*S) and is computed only
+//  for output cells inside its region (zero elsewhere, no bias there). Inside a region the pooled conv1 maps are read through a
+//  weight mask: 1 inside the region, then 0 (hard) or a linear / gaussian fade over "margin" cells outside it (overlap).
+//  Channel connections are dense, conv1, pooling and the classifier are shared and unchanged. Model A is the baseline.
+// ======================================================================
+function myBuildSp(t) {
+  if (t.type !== 'F') return null;
+  const S = t.S, R = S * S, o = t.so, sg = Math.max(0.5, o / 2), reg = i => Math.min(S - 1, Math.floor(i * S / P1O)), PP = P1O * P1O;
+  const m = new Float32Array(R * PP), reg2 = new Uint8Array(C2O * C2O), lo = [], hi = [];
+  for (let i = 0; i < P1O; i++) { const r = reg(i); if (lo[r] === undefined) lo[r] = i; hi[r] = i; }
+  for (let y = 0; y < C2O; y++) for (let x = 0; x < C2O; x++) reg2[y * C2O + x] = reg(y + 1) * S + reg(x + 1);
+  for (let r = 0; r < R; r++) { const ry = Math.floor(r / S), rx = r % S;
+    for (let py = 0; py < P1O; py++) for (let px = 0; px < P1O; px++) {
+      const d = Math.max(lo[ry] - py, 0, py - hi[ry], lo[rx] - px, 0, px - hi[rx]);
+      m[r * PP + py * P1O + px] = d === 0 ? 1 : (t.sm === 'hard' || d > o ? 0 : (t.sm === 'linear' ? 1 - d / (o + 1) : Math.exp(-d * d / (2 * sg * sg))));
+    } }
+  return { S, R, m, reg2 };
+}
+function myOwnedMacs(net) {
+  const sp = net.sp, cells = new Array(sp.R).fill(0); for (let i = 0; i < sp.reg2.length; i++) cells[sp.reg2[i]]++;
+  let s = 0; for (let f = 0; f < C2F; f++) for (let c = 0; c < C1F; c++) if (net.edge[f * C1F + c] > 0) s += 9 * cells[f % sp.R];
+  return s;
+}
+function myFPaint(t) {
+  const sp = myBuildSp(t); if (!sp) return;
+  myTrPaint('myFMask', P1O, i => { const v = 255 * sp.m[i]; return [v, v, v]; });
+  myTrPaint('myFReg', C2O, i => { const h = myPal[sp.reg2[i] % myPal.length]; return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; });
+}
+function myFDoc(t) {
+  return '<b>Model F, spatial islands.</b> The conv2 map is cut into ' + t.S + 'x' + t.S + ' regions. Filter f owns region f mod ' + t.S * t.S + ' and is zero outside it. Inside its region it reads the pooled conv1 maps through the mask shown below (' + (t.sm === 'hard' ? 'hard: nothing outside the region' : t.sm + ' fade over ' + t.so + ' cell(s) outside the region') + '). Everything else is shared. <span class="warn">Browser only: the firmware does not implement this rule, so F cannot be the Default Device Model.</span>';
+}
+let myFExp = null;
+async function myRunFExp() {
+  if (state.training) return; if (state.classes.length < 2) { alert('Load a data source first.'); return; }
+  const S = parseInt($('myFS').value) || 2; if (C2F < S * S) { alert('Each region needs at least one filter: conv2 filters (' + C2F + ') must be at least ' + S * S + '.'); return; }
+  const R = Math.max(1, Math.min(5, parseInt($('myFExpN').value) || 3)), saved = { type: $('myType').value, seed: $('mySeed').value, cont: $('cont').checked, m: $('myFMode').value, o: $('myFO').value }, out = $('myFExpOut');
+  const base = parseInt(saved.seed) > 0 ? parseInt(saved.seed) : 1000 + Math.floor(Math.random() * 100000);
+  const V = [['A dense (baseline)', 'A', 'hard', 0], ['F hard boundary', 'F', 'hard', 0], ['F linear overlap, 1 cell', 'F', 'linear', 1], ['F gaussian overlap, 2 cells', 'F', 'gauss', 2]], res = V.map(v => ({ nm: v[0], acc: [], loss: [], macs: 0, par: 0 }));
+  myBatch = true; $('cont').checked = false; state.stop = false;
+  try { for (let i = 0; i < R && !state.stop; i++) for (let v = 0; v < V.length && !state.stop; v++) {
+    $('myType').value = V[v][1]; $('myFMode').value = V[v][2]; $('myFO').value = V[v][3]; $('mySeed').value = base + i; myRenderTopoInfo(); out.textContent = 'Seed ' + (base + i) + ', ' + V[v][0] + ' (' + (i * V.length + v + 1) + ' of ' + R * V.length + ') ...';
+    await onTrain(); if (state.stop) break;
+    const net = state.net, val = currentSplit().val, m = val.length ? myMeasure(net, val, new Float32Array(IN * IN * 3)) : null, c = myCounts(net);
+    res[v].acc.push(m ? m.acc : null); res[v].loss.push(m ? m.loss : null); res[v].macs = c.macs; res[v].par = c.active; } }
+  finally { myBatch = false; $('cont').checked = saved.cont; $('mySeed').value = saved.seed; $('myType').value = saved.type; $('myFMode').value = saved.m; $('myFO').value = saved.o; myRenderTopoInfo(); myRenderGraphUI(); }
+  myFExp = { res, R, base, S, layout: layoutKey() };
+  const ag = a => { const v = a.filter(x => x != null); if (!v.length) return 'n/a'; const m = v.reduce((x, y) => x + y, 0) / v.length, sd = v.length > 1 ? Math.sqrt(v.reduce((x, y) => x + (y - m) ** 2, 0) / (v.length - 1)) : null; return m; };
+  out.innerHTML = '<p><b>Validation results, ' + S + 'x' + S + ' regions, layout ' + esc(layoutKey()) + ', seeds ' + base + ' to ' + (base + R - 1) + ' (same split, settings and initial weights for every variant).</b></p>' +
+    myTbl(['Variant', 'val accuracy per seed', 'mean val accuracy', 'mean val loss', 'conv MACs per image (counted, not measured)', 'active parameters'], res.map(r => { const a = r.acc.filter(x => x != null), l = r.loss.filter(x => x != null), mean = z => z.reduce((x, y) => x + y, 0) / z.length;
+      return [r.nm, r.acc.map(x => myPct(x)).join(', '), a.length ? myPct(mean(a)) : 'n/a', l.length ? myNum(mean(l)) : 'n/a', r.macs.toLocaleString(), r.par.toLocaleString()]; })) +
+    '<p class="note"><b>Hypothesis:</b> a hard spatial boundary loses information near region edges, and a small overlap recovers some of it. <b>Baseline:</b> A. <b>Single change per row:</b> the boundary rule. A MAC count is arithmetic, not speed, and the firmware cannot run F, so there is no device timing. Validation only: no test images were used, and ' + R + ' seed(s) on a small validation set is weak evidence. Differences smaller than the spread between seeds mean nothing. Check whether F also beats a dense model E pruned to similar cost before claiming the partition itself helps.</p>';
+}
 // ---------- Graph statistics ----------
 async function myRenderStats(timeIt) {
   const g = myCur(), net = g.net, t = net.topo, el = $('myStats'), S = myGraphStats(net); let h = '';
@@ -2630,7 +2712,7 @@ async function onTrain() {
     net.ver++; state.wStatus = 'trained'; state.dirty = true; state.wNote = 'Trained in this browser (not saved yet).'; state.evalStale = false;
     const secs = (performance.now() - t0) / 1000;
     setSt((res.stopped ? 'Stopped' : (res.failed ? 'Stopped after repeated non-finite loss' : 'Training complete')) + ' in ' + secs.toFixed(1) + ' s. Model is in memory; save it in section 7.'); log($('trainStatus').textContent);
-    myRecordRun(net, sp, secs, seed); myStorePut(net, seed, o, sp);
+    myRecordRun(net, sp, secs, seed); myStorePut(net, seed, o, sp); if (!myBatch) myPickDefault(net.topo.type);
     renderSource(); renderModelInfo(); renderClasses(); await runEval();
   } catch (e) { log('Training error: ' + e.message); setSt('Training error: ' + e.message); }
   state.training = false; state.pause = false; setTrainButtons(); myRenderGraphUI();
@@ -2683,7 +2765,7 @@ async function myUseModel(k) {
   myAbl.c1.clear(); myAbl.c2.clear(); myAbl.e.clear(); myActs = null; myWriteTopo(net.topo); myFxSync(net); log('Stored model ' + k + ' is now the active model (' + e.desc + ').');
   renderAll(); try { await runEval(); } catch (err) { log('Evaluation: ' + err.message); }
 }
-function myPickDefault(k) { const e = myStore[k]; if (!e || !myStoreOk(e)) return; myDefDev = k; log('Default Device Model: ' + k + ' (' + e.desc + ').'); myRenderStore(); }
+function myPickDefault(k) { const e = myStore[k]; if (!e || !myStoreOk(e)) return; if (k === 'F') { log('Model F is browser only (the firmware cannot run spatial islands), so the Default Device Model stays ' + (myDefDev || 'unchosen') + '.'); return; } myDefDev = k; log('Default Device Model: ' + k + ' (' + e.desc + ').'); myRenderStore(); }
 function myExportNet() {   // false = blocked (the user must choose), null = no model, else the net to export
   if (!Object.keys(myStore).length) return hasModel() ? state.net : null;
   if (!myDefDev || !myStore[myDefDev]) { alert('Choose a Default Device Model first (Compare tab, Stored models). Nothing was exported.'); return false; }
@@ -2713,12 +2795,12 @@ async function myLoadSetFile(inp) {
   myRenderStore();
 }
 function myRenderStore() {
-  const el = $('myStoreBox'); if (!el) return; const ks = ['A', 'B', 'C', 'D', 'E'];
+  const el = $('myStoreBox'); if (!el) return; const ks = ['A', 'B', 'C', 'D', 'E', 'F'];
   const rows = ks.map(k => { const e = myStore[k]; if (!e) return [k + ' ' + MY_TYPES[k], '<span class="note">empty</span>', '', '', '', ''];
     const ok = myStoreOk(e), act = state.net && state.net.runId === e.runId, st = !ok ? '<span class="bad">incompatible (layout or class labels changed)</span>' : (act ? (state.net.ver === e.ver ? 'active' : '<span class="warn">active, modified</span>') : 'available') + (e.saved ? ', in a saved file' : ', not saved to a file');
     return [(myDefDev === k ? '&#9733; ' : '') + k + ' ' + MY_TYPES[k], st, esc(e.desc) + '<br><span class="note">seed ' + e.seed + ', ' + e.epochs + ' epochs, classes ' + esc(e.classes.join('/')) + '</span>', myPct(e.acc) + (e.nval ? ' (' + e.nval + ' val)' : ''), myTestCell(k),
       '<button class="tabbtn" ' + (ok ? '' : 'disabled') + ' onclick="myUseModel(\'' + k + '\')">Make active</button> <button class="tabbtn" ' + (ok ? '' : 'disabled') + ' onclick="myPickDefault(\'' + k + '\')">Set as default</button> <button class="tabbtn" onclick="myDlModel(\'' + k + '\')">Save</button>']; });
-  el.innerHTML = '<h3>Stored models (A to E)</h3><div class="info"><div><b>Active Model</b>: the one you are inspecting or training now.</div><div><b>Stored Models</b>: separate copies of A to D in this tab. Training one never changes another. They are lost on page reload unless saved.</div><div><b>Default Device Model</b>: the one exported to the device. Only you change it (&#9733;).</div><div><b>Saved Model Bundle</b>: a .json file with one or all stored models and the default choice. Device export writes the Default Device Model as myWeights.bin (what the firmware loads), and every stored model as A-myWeights.bin to E-myWeights.bin beside it. config.json names the active model.</div><div><b>Test accuracy</b>: each stored model can be scored once on the held-out test images. Nothing else ever touches them.</div></div>'
+  el.innerHTML = '<h3>Stored models (A to F)</h3><div class="info"><div><b>Active Model</b>: the one you are inspecting or training now.</div><div><b>Stored Models</b>: separate copies of A to D in this tab. Training one never changes another. They are lost on page reload unless saved.</div><div><b>Default Device Model</b>: the one exported to the device. It is set automatically to the model you just trained or made (not during Train all, Repeat or sweeps), and you can change it (&#9733;). F is never chosen: the firmware cannot run it.</div><div><b>Saved Model Bundle</b>: a .json file with one or all stored models and the default choice. Device export writes the Default Device Model as myWeights.bin (what the firmware loads), and every stored model as A-myWeights.bin to E-myWeights.bin beside it. config.json names the active model.</div><div><b>Test accuracy</b>: each stored model can be scored once on the held-out test images. Nothing else ever touches them.</div></div>'
     + myLooksNote() + myTbl(['Model', 'Status', 'Architecture and training', 'Validation accuracy', 'Test accuracy (scored once)', 'Actions'], rows.map(r => r.slice(0, 6)))
     + '<div class="row"><button class="tabbtn" onclick="myDlAll()">Save all stored models (bundle)</button><button class="tabbtn" onclick="$(\'mySetFile\').click()">Load bundle or single model file</button><input type="file" id="mySetFile" accept=".json" hidden onchange="myLoadSetFile(this)"></div><p class="note" id="myStoreMsg"></p><p class="note">The comparison table below uses the run recorded for each architecture. Models loaded from a file appear above but have no recorded run until retrained. To inspect, ablate or continue one, press Make active.</p>';
   const d = $('myDevInfo'); if (!d) return; const e = myStore[myDefDev];
@@ -2803,7 +2885,7 @@ async function myMakeE(refKey, quiet) {
     if (o.epochs > 0) await runTraining(net, sp.train, sp.val, o, hk);
     net.topo.hist.accFinal = myValAcc(net, sp.val); net.ver++; state.wStatus = 'trained'; state.dirty = true; state.wNote = 'Model E made in this browser (not saved yet).'; state.evalStale = false;
     const secs = (performance.now() - t0) / 1000; setSt('Model E ready in ' + secs.toFixed(1) + ' s.');
-    myRecordRun(net, sp, secs, a.seed); myStorePut(net, a.seed, o, sp);
+    myRecordRun(net, sp, secs, a.seed); myStorePut(net, a.seed, o, sp); if (!quiet) myPickDefault('E');
     renderSource(); renderModelInfo(); renderClasses(); await runEval();
   } catch (e) { msg('Model E error: ' + e.message); }
   state.training = false; state.pause = false; setTrainButtons(); myRenderGraphUI(); return true;
@@ -2857,7 +2939,7 @@ function myRenderSweep() {
 // ---------- Compare ----------
 function myRenderCmp() {
   myRenderStore();
-  const el = $('myCmp'), ks = ['A', 'B', 'C', 'D', 'E'].filter(k => myRuns[k]); if (!ks.length) { el.innerHTML = '<p class="note">No runs recorded yet. Train a model, or press Train all four.</p>'; return; }
+  const el = $('myCmp'), ks = ['A', 'B', 'C', 'D', 'E', 'F'].filter(k => myRuns[k]); if (!ks.length) { el.innerHTML = '<p class="note">No runs recorded yet. Train a model, or press Train all four.</p>'; return; }
   const cur = layoutKey(), cls = JSON.stringify(state.classes), sp = new Set(ks.map(k => myRuns[k].split)); let h = '';
   if (sp.size > 1) h += '<p class="warn">These runs used different train/validation splits. Accuracy differences are not a fair comparison.</p>';
   ks.forEach(k => { const r = myRuns[k]; if (r.layout !== cur || JSON.stringify(r.classes) !== cls) h += '<p class="warn">Run ' + k + ' used layout ' + r.layout + ' and classes [' + esc(r.classes.join(', ')) + '], not the current ones.</p>'; });
@@ -3340,7 +3422,7 @@ function myRenderGraph() {
 
 // ---------- wiring ----------
 $('myTabs').onclick = e => { const b = e.target.closest('.tabbtn'); if (!b) return; myTab = +b.dataset.t; myRenderTab(); };
-['myType', 'myG', 'myK', 'myLam', 'myGateLr', 'myFt'].forEach(id => $(id).addEventListener('change', () => { myRenderTopoInfo(); myRenderTab(); }));
+['myType', 'myG', 'myK', 'myLam', 'myGateLr', 'myFt', 'myFS', 'myFMode', 'myFO'].forEach(id => $(id).addEventListener('change', () => { myRenderTopoInfo(); myRenderTab(); }));
 $('btnTrain2').onclick = () => $('btnTrain').click(); $('btnStop2').onclick = () => $('btnStop').click();
 $('btnPred').onclick = myPredict; $('btnActs').onclick = myComputeActs; $('btnEx').onclick = myShowExample;
 $('btnAblRun').onclick = myAblRun; $('btnAblSweep').onclick = myAblSweep; $('btnAblClear').onclick = () => { myAbl.c1.clear(); myAbl.c2.clear(); myAbl.e.clear(); myRenderAblUi(); };
